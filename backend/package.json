@@ -1,0 +1,14 @@
+{
+  "name": "moviesda-backend",
+  "version": "1.0.0",
+  "description": "Backend service and MCP server for moviesda32.com crawler",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.5.0",
+    "cheerio": "^1.0.0"
+  }
+}
