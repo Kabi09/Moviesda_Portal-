@@ -18,6 +18,29 @@ It is split into two parts:
 
 ---
 
+## How It Works
+
+This application retrieves movies and download links dynamically from Moviesda. Here is a simple explanation of how it works:
+
+### 1. Parallel Search Pipeline
+When you search for a movie (e.g., "Leo"), the backend triggers multiple searches in parallel:
+* **Alphabetical Directory**: Searches pages matching the first letter of the movie.
+* **Actor Collections**: Traverses different actor index folders.
+* **Year Folders**: Fallback search scanning folders for recent release years (e.g., 2026, 2025, 2024).
+* **HD Movies Directory**: Runs as a secondary fallback if other channels yield zero results.
+
+Results from all directories are gathered, duplicate links are removed, and the clean movie list is sent to the frontend.
+
+### 2. Recursive Crawl & Extraction
+When you click on a movie to see download links:
+* **Recursive Folder Traversal**: The scraper starts at the movie's page and recursively follows directory/folder paths (`.folder` links) to find target file pages.
+* **Info & Metadata Extraction**: Once it lands on the target file page, it extracts movie details (like poster, description, genre, director, and actors) and movie file specifics (like resolution, duration, format, and file size).
+* **Mirror Harvesting**: It gathers all direct server mirror download URLs and sends them back to the frontend.
+
+The frontend then presents the movie information on top and lists download mirrors categorized by file resolution and size at the bottom.
+
+---
+
 ## How to Run Locally
 
 ### 1. Start the Backend API Server
