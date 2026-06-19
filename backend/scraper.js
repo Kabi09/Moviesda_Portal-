@@ -368,7 +368,13 @@ export async function extractDownloadLinks(moviePath) {
           const name = $(el).text().trim();
           const href = $(el).attr('href');
           if (href) {
-            servers.push({ name, url: href });
+            try {
+              // Resolve relative URLs using the parent page URL
+              const resolvedUrl = new URL(href, url).href;
+              servers.push({ name, url: resolvedUrl });
+            } catch (e) {
+              servers.push({ name, url: href });
+            }
           }
         });
 

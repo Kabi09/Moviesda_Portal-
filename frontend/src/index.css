@@ -344,6 +344,7 @@ h1, h2, h3, h4 {
   width: 100%;
   max-width: 950px;
   max-height: 90vh;
+  min-height: 0;
   overflow-y: auto;
   padding: 2.2rem;
   position: relative;
