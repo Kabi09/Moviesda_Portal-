@@ -113,7 +113,7 @@ export default function App() {
             <input
               type="text"
               className="search-input"
-              placeholder="Search movies, web series..."
+              placeholder="Search movies....."
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               disabled={loadingSearch || loadingDownloads}
