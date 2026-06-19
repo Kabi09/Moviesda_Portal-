@@ -182,7 +182,7 @@ async function searchActorCollections(query) {
 
         const totalPagesText = $('#totalPages').text().trim();
         const totalPages = parseInt(totalPagesText) || 1;
-        
+
         if (totalPages > 1) {
           const subPromises = [];
           for (let page = 2; page <= totalPages; page++) {
@@ -218,7 +218,7 @@ async function searchMovies(query) {
   if (!normQuery) return [];
 
   console.log(`[Search] Running parallel search for '${query}' across alphabetical, actor, and year listings...`);
-  
+
   const [alphabeticalMatches, actorMatches, fallbackMatches] = await Promise.all([
     searchMoviesAlphabetical(normQuery),
     searchActorCollections(normQuery),
