@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { 
   Search, 
   Film, 
@@ -17,7 +17,7 @@ import {
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:3000/api';
 
 export default function App() {
-  const [query, setQuery] = useState('');
+  const [query, setQuery] = useState('dude');
   const [movies, setMovies] = useState([]);
   const [selectedMovie, setSelectedMovie] = useState(null);
   const [downloads, setDownloads] = useState([]);
@@ -26,6 +26,10 @@ export default function App() {
   const [loadingDownloads, setLoadingDownloads] = useState(false);
   const [error, setError] = useState('');
   const [searched, setSearched] = useState(false);
+
+  useEffect(() => {
+    handleSearch();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSearch = async (e) => {
     e?.preventDefault();
