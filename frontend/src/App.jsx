@@ -114,20 +114,25 @@ export default function App() {
       <main>
         {/* Search Bar Section */}
         <section className="search-section">
-          <form className="search-bar-wrapper" onSubmit={handleSearch}>
-            <Search className="search-icon" size={22} />
-            <input
-              type="text"
-              className="search-input"
-              placeholder="Search movies....."
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              disabled={loadingSearch || loadingDownloads}
-            />
-            <button type="submit" className="search-button" disabled={loadingSearch}>
-              {loadingSearch ? 'Searching...' : 'Search Movie'}
-            </button>
-          </form>
+          <div className="search-container-vertical">
+            <form className="search-bar-wrapper" onSubmit={handleSearch}>
+              <Search className="search-icon" size={22} />
+              <input
+                type="text"
+                className="search-input"
+                placeholder="Search movies....."
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                disabled={loadingSearch || loadingDownloads}
+              />
+              <button type="submit" className="search-button" disabled={loadingSearch}>
+                {loadingSearch ? 'Searching...' : 'Search Movie'}
+              </button>
+            </form>
+            <p className="disclaimer-text front-disclaimer">
+              * Please enter the <span className="highlight-disclaimer">correct movie spelling</span> to get the correct result.
+            </p>
+          </div>
         </section>
 
         {/* Global Error Banner */}
@@ -151,7 +156,9 @@ export default function App() {
           <div className="empty-state">
             <Film size={64} className="empty-icon" />
             <h2 className="empty-title">No Movies Found</h2>
-            <p style={{ color: '#6b7280' }}>Try checking spelling, removing punctuation, or searching by year.</p>
+            <p className="disclaimer-text">
+              * Please enter the <span className="highlight-disclaimer">correct movie spelling</span> to get the correct result.
+            </p>
           </div>
         )}
 
@@ -209,7 +216,7 @@ export default function App() {
       <footer className="site-footer">
         <p>
           Developed with <Heart className="heart-icon" size={16} /> by{' '}
-          <span className="developer-name">Kabilan</span> &copy; 2026
+          <a href="https://www.kabilan.in" target="_blank" rel="noopener noreferrer" className="developer-name">Kabilan</a> &copy; 2026
         </p>
       </footer>
 

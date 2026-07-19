@@ -1023,6 +1023,8 @@ main {
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   transition: var(--transition-smooth);
+  text-decoration: none;
+  display: inline-block;
 }
 
 .developer-name:hover {
@@ -1035,3 +1037,37 @@ main {
   50% { transform: scale(1.15); }
   100% { transform: scale(1); }
 }
+
+/* Disclaimer styling for empty states */
+.disclaimer-text {
+  color: var(--text-secondary);
+  font-size: 1.05rem;
+  margin-top: 0.5rem;
+  max-width: 500px;
+  line-height: 1.6;
+}
+
+.highlight-disclaimer {
+  color: var(--accent-coral);
+  font-weight: 700;
+  background: linear-gradient(135deg, var(--accent-coral), var(--accent-magenta));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  display: inline-block;
+  position: relative;
+}
+
+.search-container-vertical {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  gap: 1rem;
+}
+
+.front-disclaimer {
+  margin-top: 0;
+  text-align: center;
+}
+
+
