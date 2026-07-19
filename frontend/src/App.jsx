@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { 
   Search, 
   Film, 
@@ -9,8 +9,10 @@ import {
   HardDrive, 
   Clock, 
   Maximize2, 
-  FolderOpen 
+  FolderOpen,
+  Heart
 } from 'lucide-react';
+
 
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:3000/api';
 
@@ -199,6 +201,13 @@ export default function App() {
           </section>
         )}
       </main>
+
+      <footer className="site-footer">
+        <p>
+          Developed with <Heart className="heart-icon" size={16} /> by{' '}
+          <span className="developer-name">Kabilan</span> &copy; 2026
+        </p>
+      </footer>
 
       {/* Modal Dialog Details & Servers Drawer */}
       {selectedMovie && (
