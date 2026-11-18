@@ -36,6 +36,11 @@ export default function App() {
     const cleanQuery = query.trim();
     if (!cleanQuery) return;
 
+    // Track movie search event in Umami (for user searches)
+    if (e && typeof window !== 'undefined' && window.umami) {
+      window.umami.track('Movie Search', { name: cleanQuery });
+    }
+
     setLoadingSearch(true);
     setError('');
     setSearched(true);
