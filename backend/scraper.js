@@ -1,6 +1,7 @@
 import * as cheerio from 'cheerio';
 
-const BASE_URL = process.env.BASE_URL || 'https://moviesda32.com';
+const rawBase = (process.env.BASE_URL || 'https://moviezda.co').trim();
+const BASE_URL = rawBase.replace(/\/+$/, '');
 
 async function fetchPage(url) {
   try {
@@ -377,6 +378,22 @@ export async function extractDownloadLinks(moviePath) {
             }
           }
         });
+
+        // Add Watch Online servers
+        const idMatch = servers.map(s => s.url.match(/(?:file|page)\/(\d+)/)).find(Boolean) || url.match(/\/(\d+)/);
+        if (idMatch && idMatch[1]) {
+          const fileId = idMatch[1];
+          servers.push({
+            name: 'Watch Online Server 1',
+            url: `https://play.onestream.today/stream/page/${fileId}`,
+            type: 'stream'
+          });
+          servers.push({
+            name: 'Watch Online Server 2',
+            url: `https://play.onestream.today/stream/page/${fileId}`,
+            type: 'stream'
+          });
+        }
 
         filesList.push({
           fileName: fileName || $('title').text().trim(),
