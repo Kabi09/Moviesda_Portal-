@@ -29,6 +29,7 @@ if (fs.existsSync(envPath)) {
   }
 }
 
+console.log(process.env.BASE_URL);
 // MCP Server Setup
 const server = new Server(
   {
