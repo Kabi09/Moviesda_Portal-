@@ -10,8 +10,7 @@ import {
   Clock, 
   Maximize2, 
   FolderOpen,
-  Heart,
-  Play
+  Heart
 } from 'lucide-react';
 
 
@@ -380,23 +379,18 @@ export default function App() {
 
                           {file.servers && file.servers.length > 0 && (
                             <div className="server-links-container">
-                              {file.servers.map((srv, sIdx) => {
-                                const isWatch = srv.type === 'stream' || srv.name.toLowerCase().includes('watch') || srv.name.toLowerCase().includes('stream');
-                                return (
-                                  <a
-                                    key={sIdx}
-                                    href={srv.url}
-                                    target="_blank"
-                                    rel="nofollow noopener noreferrer"
-                                    download={!isWatch}
-                                    className={`server-btn ${isWatch ? 'server-btn-watch' : 'server-btn-direct'}`}
-                                    title={isWatch ? 'Watch movie online' : '1-Click Direct Download'}
-                                  >
-                                    {isWatch ? <Play size={14} /> : <Download size={14} />}
-                                    {srv.name}
-                                  </a>
-                                );
-                              })}
+                              {file.servers.map((srv, sIdx) => (
+                                <a
+                                  key={sIdx}
+                                  href={srv.url}
+                                  target="_blank"
+                                  rel="nofollow noopener noreferrer"
+                                  className="server-btn"
+                                >
+                                  <Download size={14} />
+                                  {srv.name}
+                                </a>
+                              ))}
                             </div>
                           )}
                         </div>

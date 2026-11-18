@@ -184,12 +184,7 @@ Start Movie URL (/leo-2023-tamil-movie/)
      - **Duration** (e.g. `2h 35m`)
      - **Video Resolution** (e.g. `1280x720`, `640x360`)
      - **Download Format** (e.g. `mp4`, `mkv`)
-   - **Multi-Tier Intermediate Resolution & 1-Click Direct Downloads**:
-     - Moviesda pages typically route download requests through intermediate landing pages (`download.moviespage.xyz/download/file/...` -> `movies.downloadpage.xyz/download/page/...` -> `cdn.uptomkv.ch/download.php?dl=...`).
-     - The scraper detects intermediate URLs (`isIntermediateUrl`) and automatically resolves the chain recursively.
-     - For direct downloads, it executes a `HEAD` request to capture the 302 `location` header, obtaining the final direct media file URL (`https://mv1.uptomkv.ch/files/...mp4?h=...&e=...`).
-     - This gives users immediate, 1-click downloads with zero redirection to external ad landing pages.
-     - Streaming links (`https://play.onestream.today/stream/page/...`) are also parsed and separated into "Watch Online" options.
+   - It captures all mirror links within `.dlink a`.
    - Relative URLs are converted to fully qualified URLs via `new URL(href, url).href`.
 4. **Branch Node Traversal (Directories)**:
    - When not on a leaf page, the crawler identifies all links under `.f a` and `.folder a`.

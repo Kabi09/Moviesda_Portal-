@@ -1,7 +1,6 @@
 import * as cheerio from 'cheerio';
 
-const rawBase = (process.env.BASE_URL || 'https://moviesda.io').trim();
-const BASE_URL = rawBase.replace(/\/+$/, '');
+const BASE_URL = process.env.BASE_URL || 'https://moviesda32.com';
 
 async function fetchPage(url) {
   try {
@@ -285,110 +284,6 @@ export async function searchMovies(query) {
   return enrichedMatches;
 }
 
-function isIntermediateUrl(url) {
-  if (!url || typeof url !== 'string') return false;
-  const lower = url.toLowerCase();
-  return lower.includes('/download/file/') || 
-         lower.includes('/download/page/') || 
-         lower.includes('downloadpage') || 
-         lower.includes('moviespage');
-}
-
-// Recursively resolves multi-tier intermediate download landing pages:
-// moviespage.xyz/download/file/ -> downloadpage.xyz/download/page/ -> cdn.uptomkv.ch -> mv1.uptomkv.ch direct file
-async function resolveDirectDownloadLinks(startUrl) {
-  try {
-    console.error(`[Crawler] Resolving download chain from: ${startUrl}`);
-    const visited = new Set();
-    let currentUrls = [startUrl];
-    let finalServers = [];
-
-    for (let depth = 0; depth < 3; depth++) {
-      const nextUrls = [];
-      for (const url of currentUrls) {
-        if (visited.has(url)) continue;
-        visited.add(url);
-
-        try {
-          const html = await fetchPage(url);
-          const $ = cheerio.load(html);
-
-          const extractedLinks = [];
-          $('.dlink a').each((i, el) => {
-            const name = $(el).text().trim();
-            const href = $(el).attr('href');
-            if (href && !href.startsWith('#') && !href.includes('/app/open/')) {
-              const absUrl = href.startsWith('http') ? href : new URL(href, url).href;
-              extractedLinks.push({ name: name || `Server ${i + 1}`, url: absUrl });
-            }
-          });
-
-          for (const item of extractedLinks) {
-            if (isIntermediateUrl(item.url)) {
-              if (!visited.has(item.url) && !nextUrls.includes(item.url)) {
-                nextUrls.push(item.url);
-              }
-            } else {
-              finalServers.push(item);
-            }
-          }
-        } catch (err) {
-          console.error(`[Crawler] Failed fetching intermediate page ${url}:`, err.message);
-        }
-      }
-
-      if (nextUrls.length === 0) break;
-      currentUrls = nextUrls;
-    }
-
-    // Deduplicate servers
-    const uniqueServers = [];
-    for (const s of finalServers) {
-      if (!uniqueServers.some(u => u.url === s.url && u.name === s.name)) {
-        uniqueServers.push(s);
-      }
-    }
-
-    // Resolve 302 location headers for direct download servers (e.g. cdn.uptomkv.ch -> mv1.uptomkv.ch)
-    const resolvedFinal = await Promise.all(
-      uniqueServers.map(async (item) => {
-        if (item.name.toLowerCase().includes('watch') || item.name.toLowerCase().includes('stream')) {
-          return { ...item, type: 'stream' };
-        }
-
-        try {
-          const headRes = await fetch(item.url, {
-            method: 'HEAD',
-            redirect: 'manual',
-            headers: {
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36',
-              'Referer': 'https://movies.downloadpage.xyz/'
-            }
-          });
-
-          const location = headRes.headers.get('location');
-          if (location && location.startsWith('http')) {
-            console.error(`[Crawler] Successfully resolved direct file URL for ${item.name}`);
-            return {
-              name: item.name,
-              url: location,
-              type: 'direct'
-            };
-          }
-        } catch (err) {
-          console.error(`[Crawler] 302 resolution failed for ${item.name}, using origin dl URL:`, err.message);
-        }
-        return { ...item, type: 'direct' };
-      })
-    );
-
-    return resolvedFinal;
-  } catch (err) {
-    console.error(`[Crawler] Error resolving intermediate download page ${startUrl}:`, err.message);
-    return [];
-  }
-}
-
 // Recursively find all download links starting from a movie page path/URL
 export async function extractDownloadLinks(moviePath) {
   const startUrl = moviePath.startsWith('http') ? moviePath : `${BASE_URL}${moviePath}`;
@@ -468,7 +363,7 @@ export async function extractDownloadLinks(moviePath) {
           }
         });
 
-        const rawServers = [];
+        const servers = [];
         $('.dlink a').each((i, el) => {
           const name = $(el).text().trim();
           const href = $(el).attr('href');
@@ -476,38 +371,12 @@ export async function extractDownloadLinks(moviePath) {
             try {
               // Resolve relative URLs using the parent page URL
               const resolvedUrl = new URL(href, url).href;
-              rawServers.push({ name, url: resolvedUrl });
+              servers.push({ name, url: resolvedUrl });
             } catch (e) {
-              rawServers.push({ name, url: href });
+              servers.push({ name, url: href });
             }
           }
         });
-
-        // Resolve any intermediate redirect landing pages to direct download links
-        let servers = [];
-        const intermediateUrls = [...new Set(
-          rawServers
-            .map(s => s.url)
-            .filter(isIntermediateUrl)
-        )];
-
-        if (intermediateUrls.length > 0) {
-          const resolvedGroups = await Promise.all(
-            intermediateUrls.map(u => resolveDirectDownloadLinks(u))
-          );
-          for (const group of resolvedGroups) {
-            for (const item of group) {
-              if (!servers.some(s => s.url === item.url && s.name === item.name)) {
-                servers.push(item);
-              }
-            }
-          }
-          if (servers.length === 0) {
-            servers = rawServers;
-          }
-        } else {
-          servers = rawServers;
-        }
 
         filesList.push({
           fileName: fileName || $('title').text().trim(),
