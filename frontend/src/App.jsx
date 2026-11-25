@@ -76,6 +76,9 @@ export default function App() {
   const handleSearch = async (e) => {
     e?.preventDefault();
     const cleanQuery = query.trim();
+    if (e && cleanQuery && typeof window !== 'undefined' && window.umami) {
+      window.umami.track(`Movie: ${cleanQuery}`, { name: cleanQuery });
+    }
     const targetQuery = cleanQuery || 'latest';
     await fetchMovies(targetQuery, 1);
   };
