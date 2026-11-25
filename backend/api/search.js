@@ -14,14 +14,13 @@ export default async function handler(req, res) {
     return res.status(200).end();
   }
 
-  // Extract query parameter q or query
-  const q = req.query.q || req.query.query;
-  if (!q) {
-    return res.status(400).json({ error: 'Missing query parameter q' });
-  }
+  // Extract query parameter q or query (default to 'latest')
+  const q = req.query.q || req.query.query || 'latest';
+  const page = parseInt(req.query.page) || 1;
+  const limit = parseInt(req.query.limit) || 15;
 
   try {
-    const results = await searchMovies(q);
+    const results = await searchMovies(q, page, limit);
     return res.status(200).json(results);
   } catch (err) {
     console.error('Vercel Search API Error:', err);

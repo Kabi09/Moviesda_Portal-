@@ -10,14 +10,21 @@ import {
   Clock, 
   Maximize2, 
   FolderOpen,
-  Heart
+  Heart,
+  ChevronRight,
+  ChevronLeft
 } from 'lucide-react';
 
 
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:3000/api';
+const MOVIES_PER_PAGE = 15;
 
 export default function App() {
-  const [query, setQuery] = useState('dude');
+  const [query, setQuery] = useState('');
+  const [activeQuery, setActiveQuery] = useState('latest');
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [hasMore, setHasMore] = useState(false);
   const [movies, setMovies] = useState([]);
   const [selectedMovie, setSelectedMovie] = useState(null);
   const [downloads, setDownloads] = useState([]);
@@ -27,33 +34,62 @@ export default function App() {
   const [error, setError] = useState('');
   const [searched, setSearched] = useState(false);
 
-  useEffect(() => {
-    handleSearch();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const handleSearch = async (e) => {
-    e?.preventDefault();
-    const cleanQuery = query.trim();
-    if (!cleanQuery) return;
-
+  const fetchMovies = async (searchQuery, targetPage = 1) => {
     setLoadingSearch(true);
     setError('');
     setSearched(true);
     setMovies([]);
 
     try {
-      const res = await fetch(`${API_BASE}/search?q=${encodeURIComponent(cleanQuery)}`);
+      const res = await fetch(
+        `${API_BASE}/search?q=${encodeURIComponent(searchQuery)}&page=${targetPage}&limit=${MOVIES_PER_PAGE}`
+      );
       if (!res.ok) {
         throw new Error(`Server returned status: ${res.status}`);
       }
       const data = await res.json();
-      setMovies(data);
+      if (Array.isArray(data)) {
+        setMovies(data.slice(0, MOVIES_PER_PAGE));
+        setHasMore(data.length > MOVIES_PER_PAGE);
+        setTotalPages(1);
+      } else {
+        setMovies(data.movies || []);
+        setHasMore(Boolean(data.hasMore));
+        setTotalPages(data.totalPages || 1);
+      }
+      setPage(targetPage);
+      setActiveQuery(searchQuery);
     } catch (err) {
       console.error('Search error:', err);
-      setError('Failed to fetch search results. Make sure the backend server is running.');
+      setError('Failed to fetch movies. Make sure the backend server is running.');
     } finally {
       setLoadingSearch(false);
     }
+  };
+
+  useEffect(() => {
+    fetchMovies('latest', 1);
+  }, []);
+
+  const handleSearch = async (e) => {
+    e?.preventDefault();
+    const cleanQuery = query.trim();
+    const targetQuery = cleanQuery || 'latest';
+    await fetchMovies(targetQuery, 1);
+  };
+
+  const handleNextPage = async () => {
+    if (loadingSearch || !hasMore) return;
+    const nextPage = page + 1;
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    await fetchMovies(activeQuery, nextPage);
+  };
+
+  const handlePrevPage = async () => {
+    if (loadingSearch || page <= 1) return;
+    const prevPage = page - 1;
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    await fetchMovies(activeQuery, prevPage);
   };
 
   const handleFetchDownloads = async (movie) => {
@@ -164,9 +200,16 @@ export default function App() {
 
         {!loadingSearch && movies.length > 0 && (
           <section>
-            <h2 style={{ fontSize: '1.4rem', marginBottom: '1.5rem', opacity: 0.9 }}>
-              Search Results ({movies.length})
-            </h2>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+              <h2 style={{ fontSize: '1.4rem', opacity: 0.9 }}>
+                {activeQuery === 'latest' ? 'Latest Movies' : `Search Results for "${activeQuery}"`} ({movies.length})
+              </h2>
+              {totalPages > 1 && (
+                <span style={{ fontSize: '0.92rem', color: 'var(--text-secondary)' }}>
+                  Page {page} of {totalPages}
+                </span>
+              )}
+            </div>
             <div className="results-grid">
               {movies.map((movie, idx) => (
                 <div 
@@ -209,6 +252,37 @@ export default function App() {
                 </div>
               ))}
             </div>
+
+            {/* Bottom Pagination / Next Button */}
+            {(page > 1 || hasMore) && (
+              <div className="pagination-container">
+                {page > 1 && (
+                  <button
+                    type="button"
+                    className="pagination-btn pagination-btn-prev"
+                    onClick={handlePrevPage}
+                    disabled={loadingSearch}
+                  >
+                    <ChevronLeft size={18} />
+                    Previous
+                  </button>
+                )}
+                <span className="pagination-page-indicator">
+                  Page {page}{totalPages > 1 ? ` of ${totalPages}` : ''}
+                </span>
+                {hasMore && (
+                  <button
+                    type="button"
+                    className="pagination-btn pagination-btn-next"
+                    onClick={handleNextPage}
+                    disabled={loadingSearch}
+                  >
+                    Next
+                    <ChevronRight size={18} />
+                  </button>
+                )}
+              </div>
+            )}
           </section>
         )}
       </main>

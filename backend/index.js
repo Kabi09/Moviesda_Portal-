@@ -154,14 +154,11 @@ async function main() {
 
       // REST API Search endpoint
       if (req.method === 'GET' && url.pathname === '/api/search') {
-        const q = url.searchParams.get('q');
-        if (!q) {
-          res.writeHead(400, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: 'Missing query parameter q' }));
-          return;
-        }
+        const q = url.searchParams.get('q') || 'latest';
+        const page = parseInt(url.searchParams.get('page')) || 1;
+        const limit = parseInt(url.searchParams.get('limit')) || 15;
         try {
-          const results = await searchMovies(q);
+          const results = await searchMovies(q, page, limit);
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify(results));
         } catch (err) {

@@ -1070,4 +1070,68 @@ main {
   text-align: center;
 }
 
+/* Pagination / Next Button Styles */
+.pagination-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 1.2rem;
+  margin-top: 2.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.pagination-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.75rem 1.8rem;
+  border-radius: 100px;
+  font-family: var(--font-sans);
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: var(--transition-smooth);
+  border: 1px solid var(--border-glass);
+}
+
+.pagination-btn-next {
+  background: linear-gradient(135deg, var(--accent-coral), var(--accent-magenta));
+  color: white;
+  border: none;
+  box-shadow: 0 4px 15px rgba(255, 107, 139, 0.3);
+}
+
+.pagination-btn-next:hover:not(:disabled) {
+  filter: brightness(1.1);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(255, 107, 139, 0.45);
+}
+
+.pagination-btn-prev {
+  background: var(--bg-card);
+  color: var(--text-primary);
+}
+
+.pagination-btn-prev:hover:not(:disabled) {
+  background: var(--bg-card-hover);
+  border-color: rgba(255, 255, 255, 0.2);
+  transform: translateY(-2px);
+}
+
+.pagination-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.pagination-page-indicator {
+  font-size: 0.95rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  padding: 0.4rem 0.8rem;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-glass);
+  border-radius: 8px;
+}
+
+
 
