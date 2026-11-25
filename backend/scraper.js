@@ -473,7 +473,7 @@ export async function extractDownloadLinks(moviePath) {
           }
         });
 
-        const servers = [];
+        let servers = [];
         $('.dlink a').each((i, el) => {
           const name = $(el).text().trim();
           const href = $(el).attr('href');
@@ -488,56 +488,69 @@ export async function extractDownloadLinks(moviePath) {
           }
         });
 
-        // Extract Watch Online Server links if not already present on the initial details page
-        const hasWatchServer = servers.some(s => s.name.toLowerCase().includes('watch'));
-        if (!hasWatchServer) {
-          let fileId = null;
-          for (const srv of servers) {
-            const match = srv.url.match(/\/download\/(?:file|page)\/(\d+)/i);
-            if (match) {
-              fileId = match[1];
-              break;
-            }
+        // Resolve intermediate download pages directly to final Download Server 1/2 and Watch Online Server 1/2 URLs
+        let fileId = null;
+        for (const srv of servers) {
+          const match = srv.url.match(/\/download\/(?:file|page)\/(\d+)/i);
+          if (match) {
+            fileId = match[1];
+            break;
           }
-          if (!fileId) {
-            const shotSrc = $('.albumcover img').attr('src') || '';
-            const shotMatch = shotSrc.match(/\/uploads\/shots\/(\d+)-/i);
-            if (shotMatch) {
-              fileId = shotMatch[1];
-            }
+        }
+        if (!fileId) {
+          const shotSrc = $('.albumcover img').attr('src') || '';
+          const shotMatch = shotSrc.match(/\/uploads\/shots\/(\d+)-/i);
+          if (shotMatch) {
+            fileId = shotMatch[1];
           }
+        }
 
-          if (fileId) {
-            const watchServers = [];
-            try {
-              const dlPageUrl = `https://movies.downloadpage.xyz/download/page/${fileId}`;
-              const dlPageHtml = await fetchPage(dlPageUrl);
+        if (fileId) {
+          const resolvedServers = [];
+          try {
+            let dlPageUrl = `https://movies.downloadpage.xyz/download/page/${fileId}`;
+            let dlPageHtml = await fetchPage(dlPageUrl).catch(() => null);
+
+            // If direct downloadpage URL changed, follow the gateway page link dynamically
+            if (!dlPageHtml && servers[0]?.url) {
+              const gateHtml = await fetchPage(servers[0].url);
+              const $gate = cheerio.load(gateHtml);
+              const nextHref = $gate('.dlink a').first().attr('href');
+              if (nextHref) {
+                dlPageUrl = new URL(nextHref, servers[0].url).href;
+                dlPageHtml = await fetchPage(dlPageUrl);
+              }
+            }
+
+            if (dlPageHtml) {
               const $dl = cheerio.load(dlPageHtml);
               $dl('.dlink a').each((i, el) => {
                 const name = $dl(el).text().trim();
                 const href = $dl(el).attr('href');
-                if (name && href && name.toLowerCase().includes('watch')) {
+                if (name && href) {
                   try {
-                    const resolvedWatchUrl = new URL(href, dlPageUrl).href;
-                    watchServers.push({ name, url: resolvedWatchUrl });
+                    const resolvedUrl = new URL(href, dlPageUrl).href;
+                    resolvedServers.push({ name, url: resolvedUrl });
                   } catch (e) {
-                    watchServers.push({ name, url: href });
+                    resolvedServers.push({ name, url: href });
                   }
                 }
               });
-            } catch (err) {
-              console.error(`[Crawler] Fallback watch online URL for fileId ${fileId}:`, err.message);
             }
+          } catch (err) {
+            console.error(`[Crawler] Failed resolving final download page for fileId ${fileId}:`, err.message);
+          }
 
-            if (watchServers.length > 0) {
-              servers.push(...watchServers);
-            } else {
-              const streamUrl = `https://play.onestream.today/stream/page/${fileId}`;
-              servers.push(
-                { name: 'Watch Online Server 1', url: streamUrl },
-                { name: 'Watch Online Server 2', url: streamUrl }
-              );
-            }
+          if (resolvedServers.length > 0) {
+            servers = resolvedServers;
+          }
+
+          if (!servers.some(s => s.name.toLowerCase().includes('watch'))) {
+            const streamUrl = `https://play.onestream.today/stream/page/${fileId}`;
+            servers.push(
+              { name: 'Watch Online Server 1', url: streamUrl },
+              { name: 'Watch Online Server 2', url: streamUrl }
+            );
           }
         }
 
