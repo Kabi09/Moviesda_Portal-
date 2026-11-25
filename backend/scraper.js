@@ -488,6 +488,59 @@ export async function extractDownloadLinks(moviePath) {
           }
         });
 
+        // Extract Watch Online Server links if not already present on the initial details page
+        const hasWatchServer = servers.some(s => s.name.toLowerCase().includes('watch'));
+        if (!hasWatchServer) {
+          let fileId = null;
+          for (const srv of servers) {
+            const match = srv.url.match(/\/download\/(?:file|page)\/(\d+)/i);
+            if (match) {
+              fileId = match[1];
+              break;
+            }
+          }
+          if (!fileId) {
+            const shotSrc = $('.albumcover img').attr('src') || '';
+            const shotMatch = shotSrc.match(/\/uploads\/shots\/(\d+)-/i);
+            if (shotMatch) {
+              fileId = shotMatch[1];
+            }
+          }
+
+          if (fileId) {
+            const watchServers = [];
+            try {
+              const dlPageUrl = `https://movies.downloadpage.xyz/download/page/${fileId}`;
+              const dlPageHtml = await fetchPage(dlPageUrl);
+              const $dl = cheerio.load(dlPageHtml);
+              $dl('.dlink a').each((i, el) => {
+                const name = $dl(el).text().trim();
+                const href = $dl(el).attr('href');
+                if (name && href && name.toLowerCase().includes('watch')) {
+                  try {
+                    const resolvedWatchUrl = new URL(href, dlPageUrl).href;
+                    watchServers.push({ name, url: resolvedWatchUrl });
+                  } catch (e) {
+                    watchServers.push({ name, url: href });
+                  }
+                }
+              });
+            } catch (err) {
+              console.error(`[Crawler] Fallback watch online URL for fileId ${fileId}:`, err.message);
+            }
+
+            if (watchServers.length > 0) {
+              servers.push(...watchServers);
+            } else {
+              const streamUrl = `https://play.onestream.today/stream/page/${fileId}`;
+              servers.push(
+                { name: 'Watch Online Server 1', url: streamUrl },
+                { name: 'Watch Online Server 2', url: streamUrl }
+              );
+            }
+          }
+        }
+
         filesList.push({
           fileName: fileName || $('title').text().trim(),
           fileSize,

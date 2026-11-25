@@ -490,6 +490,20 @@ main {
   box-shadow: 0 4px 15px rgba(255, 107, 139, 0.2);
 }
 
+.watch-server-btn {
+  background: rgba(139, 92, 246, 0.14);
+  border: 1px solid rgba(139, 92, 246, 0.3);
+  color: #a78bfa;
+}
+
+.watch-server-btn:hover {
+  background: linear-gradient(135deg, var(--accent-violet), var(--accent-magenta));
+  color: white;
+  border-color: transparent;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 15px rgba(139, 92, 246, 0.3);
+}
+
 /* Loading animations */
 .loader-container {
   display: flex;
