@@ -1,6 +1,29 @@
 import * as cheerio from 'cheerio';
+import * as fs from 'fs';
+import * as path from 'path';
+import { fileURLToPath } from 'url';
 
-const BASE_URL = process.env.BASE_URL || 'https://moviesda32.com';
+// Ensure .env is loaded before reading BASE_URL (ES module imports are hoisted)
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const envPath = path.join(__dirname, '.env');
+if (fs.existsSync(envPath)) {
+  const envContent = fs.readFileSync(envPath, 'utf8');
+  for (const line of envContent.split('\n')) {
+    const trimmed = line.trim();
+    if (trimmed && !trimmed.startsWith('#')) {
+      const equalIndex = trimmed.indexOf('=');
+      if (equalIndex > 0) {
+        const key = trimmed.slice(0, equalIndex).trim();
+        const value = trimmed.slice(equalIndex + 1).trim();
+        if (!process.env[key]) {
+          process.env[key] = value;
+        }
+      }
+    }
+  }
+}
+
+const BASE_URL = (process.env.BASE_URL || 'https://moviesda36.com').replace(/\/+$/, '');
 
 async function fetchPage(url) {
   try {
@@ -19,12 +42,12 @@ async function fetchPage(url) {
   }
 }
 
-function parseMovieElements($, matches, normQuery) {
+function parseMovieElements($, matches, normQuery = '') {
   $('.f a').each((i, el) => {
     const title = $(el).text().trim();
     const href = $(el).attr('href');
     if (title && href) {
-      if (title.toLowerCase().includes(normQuery)) {
+      if (!normQuery || title.toLowerCase().includes(normQuery)) {
         if (!matches.some(m => m.path === href)) {
           matches.push({
             title,
@@ -35,6 +58,92 @@ function parseMovieElements($, matches, normQuery) {
       }
     }
   });
+}
+
+async function enrichPosters(movieList) {
+  console.error(`[Search] Enriching poster images for ${movieList.length} movies in parallel...`);
+  return Promise.all(
+    movieList.map(async (match) => {
+      try {
+        const html = await fetchPage(match.url);
+        const $ = cheerio.load(html);
+        const imgEl = $('#movie-info').find('picture img, img').first();
+        if (imgEl.length > 0) {
+          const src = imgEl.attr('src');
+          if (src) {
+            match.poster = src.startsWith('http') ? src : `${BASE_URL}${src}`;
+          }
+        }
+      } catch (err) {
+        console.error(`[Search] Failed to fetch poster for ${match.title}:`, err.message);
+      }
+      return match;
+    })
+  );
+}
+
+// Fast paginated fetch for a specific year directory (e.g. 2026) or latest movies
+async function fetchYearMoviesPaginated(year, page = 1, limit = 15) {
+  const ITEMS_PER_SITE_PAGE = 20;
+  const startIndex = (page - 1) * limit;
+  const endIndex = page * limit;
+  const sitePageStart = Math.floor(startIndex / ITEMS_PER_SITE_PAGE) + 1;
+  const sitePageEnd = Math.floor((endIndex - 1) / ITEMS_PER_SITE_PAGE) + 1;
+
+  const baseDirUrl = `${BASE_URL}/tamil-${year}-movies/`;
+  console.error(`[Year/Latest] Fetching ${baseDirUrl} (UI page ${page}, site pages ${sitePageStart}..${sitePageEnd})`);
+
+  try {
+    const firstSiteUrl = sitePageStart === 1 ? baseDirUrl : `${baseDirUrl}?page=${sitePageStart}`;
+    const firstHtml = await fetchPage(firstSiteUrl);
+    const $first = cheerio.load(firstHtml);
+
+    const totalSitePages = parseInt($first('#totalPages').text().trim()) || 1;
+    if (sitePageStart > totalSitePages) {
+      return {
+        movies: [],
+        page,
+        limit,
+        totalPages: Math.ceil((totalSitePages * ITEMS_PER_SITE_PAGE) / limit),
+        hasMore: false
+      };
+    }
+
+    const collected = [];
+    parseMovieElements($first, collected, '');
+
+    if (sitePageEnd > sitePageStart && sitePageEnd <= totalSitePages) {
+      for (let sp = sitePageStart + 1; sp <= sitePageEnd; sp++) {
+        try {
+          const spHtml = await fetchPage(`${baseDirUrl}?page=${sp}`);
+          const $sp = cheerio.load(spHtml);
+          parseMovieElements($sp, collected, '');
+        } catch (err) {
+          console.error(`[Year/Latest] Failed fetching site page ${sp}:`, err.message);
+        }
+      }
+    }
+
+    const localOffset = startIndex - (sitePageStart - 1) * ITEMS_PER_SITE_PAGE;
+    const pageSlice = collected.slice(localOffset, localOffset + limit);
+    const enriched = await enrichPosters(pageSlice);
+
+    const estimatedTotal = (totalSitePages - 1) * ITEMS_PER_SITE_PAGE + (sitePageEnd === totalSitePages ? collected.length - (sitePageEnd - sitePageStart) * ITEMS_PER_SITE_PAGE : ITEMS_PER_SITE_PAGE);
+    const totalUiPages = Math.max(1, Math.ceil((totalSitePages * ITEMS_PER_SITE_PAGE) / limit));
+    const hasMore = sitePageEnd < totalSitePages || (localOffset + limit < collected.length);
+
+    return {
+      movies: enriched,
+      page,
+      limit,
+      totalPages: totalUiPages,
+      total: estimatedTotal,
+      hasMore
+    };
+  } catch (error) {
+    console.error(`[Year/Latest] Failed fetching year ${year}:`, error);
+    return { movies: [], page, limit, totalPages: 1, hasMore: false };
+  }
 }
 
 // Search movies starting with the letter matching the query
@@ -222,11 +331,21 @@ async function searchActorCollections(query) {
   return matches;
 }
 
-export async function searchMovies(query) {
-  const normQuery = query.toLowerCase().trim();
-  if (!normQuery) return [];
+export async function searchMovies(query, page = 1, limit = 15) {
+  const normQuery = (query || '').toLowerCase().trim();
+  const safePage = Math.max(1, parseInt(page) || 1);
+  const safeLimit = Math.max(1, parseInt(limit) || 15);
 
-  console.error(`[Search] Running parallel search for '${query}' across alphabetical, actor, and year listings...`);
+  // If initial load ('latest' or empty) or a 4-digit year search (e.g. '2026', '2025')
+  if (!normQuery || normQuery === 'latest') {
+    return fetchYearMoviesPaginated('2026', safePage, safeLimit);
+  }
+
+  if (/^\d{4}$/.test(normQuery)) {
+    return fetchYearMoviesPaginated(normQuery, safePage, safeLimit);
+  }
+
+  console.error(`[Search] Running parallel search for '${query}' (page ${safePage}, limit ${safeLimit})...`);
   
   const [alphabeticalMatches, actorMatches, fallbackMatches] = await Promise.all([
     searchMoviesAlphabetical(normQuery),
@@ -259,29 +378,20 @@ export async function searchMovies(query) {
     }
   }
 
-  // Enrich top 16 matches with their poster image URL
-  const topMatches = matches.slice(0, 16);
-  console.error(`[Search] Enriching poster images for top ${topMatches.length} search results in parallel...`);
-  const enrichedMatches = await Promise.all(
-    topMatches.map(async (match) => {
-      try {
-        const html = await fetchPage(match.url);
-        const $ = cheerio.load(html);
-        const imgEl = $('#movie-info').find('picture img, img').first();
-        if (imgEl.length > 0) {
-          const src = imgEl.attr('src');
-          if (src) {
-            match.poster = src.startsWith('http') ? src : `${BASE_URL}${src}`;
-          }
-        }
-      } catch (err) {
-        console.error(`[Search] Failed to fetch poster for ${match.title}:`, err.message);
-      }
-      return match;
-    })
-  );
+  const startIndex = (safePage - 1) * safeLimit;
+  const endIndex = safePage * safeLimit;
+  const pageMatches = matches.slice(startIndex, endIndex);
+  const enrichedMatches = await enrichPosters(pageMatches);
+  const totalPages = Math.max(1, Math.ceil(matches.length / safeLimit));
 
-  return enrichedMatches;
+  return {
+    movies: enrichedMatches,
+    page: safePage,
+    limit: safeLimit,
+    total: matches.length,
+    totalPages,
+    hasMore: endIndex < matches.length
+  };
 }
 
 // Recursively find all download links starting from a movie page path/URL

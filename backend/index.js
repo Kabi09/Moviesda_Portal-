@@ -48,7 +48,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
     tools: [
       {
         name: "search_movies",
-        description: "Search for movies on moviesda32.com by title (case-insensitive). Can search by year or alphabet.",
+        description: "Search for movies on moviesda by title (case-insensitive). Can search by year or alphabet.",
         inputSchema: {
           type: "object",
           properties: {
