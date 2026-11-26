@@ -15,6 +15,8 @@ import {
   FolderOpen,
   Heart
 } from 'lucide-react';
+import imageNotFound from './assets/image-not-found.jpg';
+import resultNotFound from './assets/result-not-found.jpg';
 
 
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:3000/api';
@@ -356,10 +358,13 @@ export default function App() {
         {/* Search Results Display */}
         {!loadingSearch && searched && movies.length === 0 && (
           <div className="empty-state">
-            <Film size={64} className="empty-icon" />
-            <h2 className="empty-title">No Movies Found</h2>
+            <img
+              src={resultNotFound}
+              alt="Result Not Found"
+              className="result-not-found-img"
+            />
             <p className="disclaimer-text">
-              * Please enter the <span className="highlight-disclaimer">correct movie spelling</span> to get the correct result.
+              * Please enter the <span className="highlight-disclaimer">correct {searchType === 'year' ? 'release year' : searchType === 'actor' ? 'actor name' : 'movie spelling'}</span> to get the correct result.
             </p>
           </div>
         )}
@@ -400,9 +405,12 @@ export default function App() {
                         }
                       />
                     ) : (
-                      <div className="card-poster-placeholder">
-                        <Film size={40} style={{ opacity: 0.25 }} />
-                      </div>
+                      <img
+                        src={imageNotFound}
+                        alt={`${movie.title} - Image Not Found`}
+                        className="card-poster-img card-poster-fallback"
+                        loading="lazy"
+                      />
                     )}
                     <span className="badge-year-floating">{extractYear(movie.title)}</span>
                   </div>
@@ -474,15 +482,18 @@ export default function App() {
                 {/* Left side: Movie info if available */}
                 {movieDetails && (
                   <div className="movie-details-panel">
-                    {movieDetails.poster && (
-                      <div className="poster-container">
-                        <img 
-                          src={movieDetails.poster} 
-                          alt={`${movieDetails.title || 'Movie'} Poster`} 
-                          className="poster-img"
-                        />
-                      </div>
-                    )}
+                    <div className="poster-container">
+                      <img 
+                        src={movieDetails.poster || imageNotFound} 
+                        alt={`${movieDetails.title || 'Movie'} Poster`} 
+                        className={`poster-img ${!movieDetails.poster ? 'card-poster-fallback' : ''}`}
+                        onError={(e) => {
+                          e.currentTarget.onerror = null;
+                          e.currentTarget.src = imageNotFound;
+                          e.currentTarget.classList.add('card-poster-fallback');
+                        }}
+                      />
+                    </div>
                     <div className="metadata-container">
                       <div className="metadata-title">Movie Info</div>
                       <div className="metadata-grid">

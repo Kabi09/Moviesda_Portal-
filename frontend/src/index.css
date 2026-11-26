@@ -590,12 +590,22 @@ main {
 /* Empty states */
 .empty-state {
   text-align: center;
-  padding: 5rem 2rem;
+  padding: 2.5rem 1.5rem;
   color: var(--text-secondary);
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 1rem;
+  gap: 1.2rem;
+}
+
+.result-not-found-img {
+  width: 100%;
+  max-width: 520px;
+  height: auto;
+  border-radius: 18px;
+  border: 1px solid var(--border-glass);
+  box-shadow: var(--shadow-premium);
+  object-fit: cover;
 }
 
 .empty-icon {
@@ -768,6 +778,12 @@ main {
   height: 100%;
   object-fit: cover;
   transition: transform 0.5s ease;
+}
+
+.card-poster-fallback {
+  object-fit: contain !important;
+  background-color: #191c26;
+  padding: 0.35rem;
 }
 
 .movie-card-enriched:hover .card-poster-img {
