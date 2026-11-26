@@ -1145,6 +1145,15 @@ async function resolveDubbedFileServers(fileId, fallbackPageUrl = '') {
   return { servers: resolvedServers, details };
 }
 
+function extractSeasonLabel(breadcrumbs = [], fileName = '') {
+  const combined = `${(breadcrumbs || []).join(' ')} ${fileName || ''}`;
+  const m = combined.match(/\b(?:season|s)\s*[-:.]?\s*(\d{1,2})\b/i);
+  if (m) {
+    return `Season ${m[1].padStart(2, '0')}`;
+  }
+  return '';
+}
+
 function formatFolderBreadcrumb(breadcrumbs, fileName = '') {
   // Check if fileName has an Episode number (e.g. "Epi 01", "Episode 1", "EP 02")
   const epiMatch = (fileName || '').match(/\b(?:epi(?:sode)?|ep)\s*[-:.]?\s*(\d{1,3})\b/i);
@@ -1155,9 +1164,9 @@ function formatFolderBreadcrumb(breadcrumbs, fileName = '') {
 
   if (!breadcrumbs || breadcrumbs.length === 0) return '';
 
-  // Only keep top-level folder if it is a distinct Movie in a Collection (not "(Original)", "(Tamil)", or resolution like "(720p HD)")
+  // Only keep top-level folder if it is a distinct Movie in a Collection (not "(Original)", "(Tamil)", "Season", or resolution like "(720p HD)")
   const firstFolder = breadcrumbs[0] || '';
-  const isQualityOrLangFolder = /\((?:original|tamil|dubbed|hd|360p|480p|720p|1080p|mp4|\d+x\d+)\)/i.test(firstFolder);
+  const isQualityOrLangFolder = /\((?:original|tamil|dubbed|hd|360p|480p|720p|1080p|mp4|\d+x\d+|season\s*\d+)\)/i.test(firstFolder);
   if (isQualityOrLangFolder) {
     return '';
   }
@@ -1244,6 +1253,9 @@ export async function extractDownloadLinks(moviePath, category = '') {
         seenFileIds.add(fileId);
 
         const rawTitle = linkEl.text().trim();
+        // Skip 1-minute sample video files
+        if (/\bsample(?:\.mp4)?$/i.test(rawTitle)) return;
+
         let fileSize = '';
         let format = '';
         $(el).find('li').each((_, li) => {
@@ -1263,6 +1275,7 @@ export async function extractDownloadLinks(moviePath, category = '') {
           fileSize,
           format,
           pageUrl: href.startsWith('http') ? href : `${activeBaseUrl}${href}`,
+          seasonGroup: extractSeasonLabel(breadcrumbs, rawTitle),
           folderGroup: formatFolderBreadcrumb(breadcrumbs, rawTitle)
         });
       });
@@ -1274,19 +1287,21 @@ export async function extractDownloadLinks(moviePath, category = '') {
             if (details.thumbnail && !firstThumbnail) {
               firstThumbnail = details.thumbnail;
             }
+            const resolvedName = details.fileName || item.rawTitle;
             return {
-              fileName: details.fileName || item.rawTitle,
+              fileName: resolvedName,
               fileSize: details.fileSize || item.fileSize,
               duration: details.duration || '',
               resolution: details.resolution || '',
               format: details.format || item.format,
-              folderGroup: item.folderGroup,
+              seasonGroup: item.seasonGroup || extractSeasonLabel(breadcrumbs, resolvedName),
+              folderGroup: item.folderGroup || formatFolderBreadcrumb(breadcrumbs, resolvedName),
               servers,
               pageUrl: item.pageUrl
             };
           })
         );
-        filesList.push(...resolvedInline);
+        filesList.push(...resolvedInline.filter(f => !/\bsample(?:\.mp4)?$/i.test(f.fileName)));
       }
 
       // Check if we are on a dedicated file description page (contains .songinfo or .dlink)
@@ -1413,12 +1428,16 @@ export async function extractDownloadLinks(moviePath, category = '') {
         }
 
         const finalFileName = fileName || $('title').text().trim();
+        if (/\bsample(?:\.mp4)?$/i.test(finalFileName)) {
+          return;
+        }
         filesList.push({
           fileName: finalFileName,
           fileSize,
           duration,
           resolution,
           format,
+          seasonGroup: extractSeasonLabel(breadcrumbs, finalFileName),
           folderGroup: formatFolderBreadcrumb(breadcrumbs, finalFileName),
           servers,
           pageUrl: url
@@ -1478,8 +1497,10 @@ export async function extractDownloadLinks(moviePath, category = '') {
     movieInfo.poster = imdbPoster || firstThumbnail || undefined;
   }
 
-  // Sort downloads naturally by folderGroup and fileName (so Episode 01, Episode 02, ... are in clean order)
+  // Sort downloads naturally by seasonGroup, folderGroup, and fileName (so Season 01 -> Episode 01, Episode 02, ... are in clean order)
   filesList.sort((a, b) => {
+    const seasonCmp = (a.seasonGroup || '').localeCompare(b.seasonGroup || '', undefined, { numeric: true });
+    if (seasonCmp !== 0) return seasonCmp;
     const groupCmp = (a.folderGroup || '').localeCompare(b.folderGroup || '', undefined, { numeric: true });
     if (groupCmp !== 0) return groupCmp;
     return (a.fileName || '').localeCompare(b.fileName || '', undefined, { numeric: true });

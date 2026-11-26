@@ -40,6 +40,7 @@ export default function App() {
   const [brokenPosters, setBrokenPosters] = useState({});
   const [selectedMovie, setSelectedMovie] = useState(null);
   const [downloads, setDownloads] = useState([]);
+  const [activeSeason, setActiveSeason] = useState('ALL');
   const [activeFolderGroup, setActiveFolderGroup] = useState('ALL');
   const [modalFileFilter, setModalFileFilter] = useState('');
   const [movieDetails, setMovieDetails] = useState(null);
@@ -226,6 +227,7 @@ export default function App() {
     setSelectedMovie(movie);
     setLoadingDownloads(true);
     setDownloads([]);
+    setActiveSeason('ALL');
     setActiveFolderGroup('ALL');
     setModalFileFilter('');
     setMovieDetails(null);
@@ -258,6 +260,7 @@ export default function App() {
   const closeModal = () => {
     setSelectedMovie(null);
     setDownloads([]);
+    setActiveSeason('ALL');
     setActiveFolderGroup('ALL');
     setModalFileFilter('');
     setMovieDetails(null);
@@ -711,19 +714,50 @@ export default function App() {
                   ) : (
                     <div className="download-group">
                       {(() => {
-                        const folderGroups = Array.from(
-                          new Set(downloads.map((d) => d.folderGroup).filter(Boolean))
+                        // Helper to get or derive Season and Episode/Movie group for each file
+                        const getSeason = (file) => {
+                          if (file.seasonGroup) return file.seasonGroup;
+                          const m = (file.fileName || '').match(/\b(?:season|s)\s*[-:.]?\s*(\d{1,2})\b/i);
+                          return m ? `Season ${m[1].padStart(2, '0')}` : '';
+                        };
+                        const getEpisodeOrGroup = (file) => {
+                          if (file.folderGroup) return file.folderGroup;
+                          const m = (file.fileName || '').match(/\b(?:epi(?:sode)?|ep)\s*[-:.]?\s*(\d{1,3})\b/i);
+                          return m ? `Episode ${m[1].padStart(2, '0')}` : '';
+                        };
+
+                        // Exclude 1-minute sample files if full files exist
+                        const nonSampleDownloads = downloads.filter(
+                          (f) => !/\bsample(?:\.mp4)?$/i.test((f.fileName || '').trim())
                         );
+                        const baseDownloads = nonSampleDownloads.length > 0 ? nonSampleDownloads : downloads;
+
+                        const seasons = Array.from(
+                          new Set(baseDownloads.map(getSeason).filter(Boolean))
+                        ).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+                        const hasSeasons = seasons.length > 1;
+
+                        const seasonFilteredDownloads = baseDownloads.filter((file) => {
+                          if (!hasSeasons || activeSeason === 'ALL') return true;
+                          return getSeason(file) === activeSeason;
+                        });
+
+                        const folderGroups = Array.from(
+                          new Set(seasonFilteredDownloads.map(getEpisodeOrGroup).filter(Boolean))
+                        ).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
                         const hasMultipleGroups = folderGroups.length > 1;
-                        const filteredDownloads = downloads.filter((file) => {
-                          if (hasMultipleGroups && activeFolderGroup !== 'ALL' && file.folderGroup !== activeFolderGroup) {
+
+                        const filteredDownloads = seasonFilteredDownloads.filter((file) => {
+                          const grp = getEpisodeOrGroup(file);
+                          if (hasMultipleGroups && activeFolderGroup !== 'ALL' && grp !== activeFolderGroup) {
                             return false;
                           }
                           if (modalFileFilter.trim()) {
                             const q = modalFileFilter.trim().toLowerCase();
                             return (
                               (file.fileName || '').toLowerCase().includes(q) ||
-                              (file.folderGroup || '').toLowerCase().includes(q) ||
+                              (getSeason(file) || '').toLowerCase().includes(q) ||
+                              grp.toLowerCase().includes(q) ||
                               (file.resolution || '').toLowerCase().includes(q)
                             );
                           }
@@ -736,13 +770,13 @@ export default function App() {
                               <h3 style={{ fontSize: '1.15rem', color: '#f3f4f6' }}>
                                 Available Formats & Resolving Links
                               </h3>
-                              {downloads.length > 6 && (
+                              {baseDownloads.length > 6 && (
                                 <div className="modal-file-filter-box">
                                   <Search size={14} className="modal-filter-icon" />
                                   <input
                                     type="text"
                                     className="modal-file-filter-input"
-                                    placeholder="Quick filter episode or quality..."
+                                    placeholder="Quick filter season, episode, or quality..."
                                     value={modalFileFilter}
                                     onChange={(e) => setModalFileFilter(e.target.value)}
                                   />
@@ -759,39 +793,84 @@ export default function App() {
                               )}
                             </div>
 
-                            {hasMultipleGroups && (
-                              <div className="folder-groups-bar">
-                                <button
-                                  type="button"
-                                  className={`folder-group-chip ${activeFolderGroup === 'ALL' ? 'active' : ''}`}
-                                  onClick={() => setActiveFolderGroup('ALL')}
-                                >
-                                  All ({downloads.length})
-                                </button>
-                                {folderGroups.map((grp) => {
-                                  const count = downloads.filter((d) => d.folderGroup === grp).length;
-                                  return (
-                                    <button
-                                      key={grp}
-                                      type="button"
-                                      className={`folder-group-chip ${activeFolderGroup === grp ? 'active' : ''}`}
-                                      onClick={() => setActiveFolderGroup(grp)}
-                                    >
-                                      {grp} ({count})
-                                    </button>
-                                  );
-                                })}
+                            {/* Season Filter Bar */}
+                            {hasSeasons && (
+                              <div className="filter-section-block">
+                                <span className="filter-section-label">Seasons:</span>
+                                <div className="folder-groups-bar season-groups-bar">
+                                  <button
+                                    type="button"
+                                    className={`folder-group-chip season-chip ${activeSeason === 'ALL' ? 'active' : ''}`}
+                                    onClick={() => {
+                                      setActiveSeason('ALL');
+                                      setActiveFolderGroup('ALL');
+                                    }}
+                                  >
+                                    All Seasons ({baseDownloads.length})
+                                  </button>
+                                  {seasons.map((sec) => {
+                                    const count = baseDownloads.filter((d) => getSeason(d) === sec).length;
+                                    return (
+                                      <button
+                                        key={sec}
+                                        type="button"
+                                        className={`folder-group-chip season-chip ${activeSeason === sec ? 'active' : ''}`}
+                                        onClick={() => {
+                                          setActiveSeason(sec);
+                                          setActiveFolderGroup('ALL');
+                                        }}
+                                      >
+                                        {sec} ({count})
+                                      </button>
+                                    );
+                                  })}
+                                </div>
                               </div>
                             )}
 
-                            {filteredDownloads.map((file, fIdx) => (
-                              <div key={fIdx} className="file-item-card">
-                                {hasMultipleGroups && file.folderGroup && (
-                                  <div className="file-folder-badge">
-                                    {file.folderGroup}
-                                  </div>
-                                )}
-                                <div className="file-name">{file.fileName}</div>
+                            {/* Episode / Movie Part Filter Bar */}
+                            {hasMultipleGroups && (
+                              <div className="filter-section-block">
+                                {hasSeasons && <span className="filter-section-label">Episodes:</span>}
+                                <div className="folder-groups-bar">
+                                  <button
+                                    type="button"
+                                    className={`folder-group-chip ${activeFolderGroup === 'ALL' ? 'active' : ''}`}
+                                    onClick={() => setActiveFolderGroup('ALL')}
+                                  >
+                                    {hasSeasons ? 'All Episodes' : 'All'} ({seasonFilteredDownloads.length})
+                                  </button>
+                                  {folderGroups.map((grp) => {
+                                    const count = seasonFilteredDownloads.filter(
+                                      (d) => getEpisodeOrGroup(d) === grp
+                                    ).length;
+                                    return (
+                                      <button
+                                        key={grp}
+                                        type="button"
+                                        className={`folder-group-chip ${activeFolderGroup === grp ? 'active' : ''}`}
+                                        onClick={() => setActiveFolderGroup(grp)}
+                                      >
+                                        {grp} ({count})
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            )}
+
+                            {filteredDownloads.map((file, fIdx) => {
+                              const fileSeason = getSeason(file);
+                              const fileGroup = getEpisodeOrGroup(file);
+                              const badgeLabel = [fileSeason, fileGroup].filter(Boolean).join(' • ');
+                              return (
+                                <div key={fIdx} className="file-item-card">
+                                  {(hasSeasons || hasMultipleGroups) && badgeLabel && (
+                                    <div className="file-folder-badge">
+                                      {badgeLabel}
+                                    </div>
+                                  )}
+                                  <div className="file-name">{file.fileName}</div>
 
                                 <div className="file-item-meta">
                                   {file.fileSize && (
@@ -837,9 +916,10 @@ export default function App() {
                                       );
                                     })}
                                   </div>
-                                )}
-                              </div>
-                            ))}
+                                  )}
+                                </div>
+                              );
+                            })}
                           </>
                         );
                       })()}

@@ -1244,11 +1244,30 @@ main {
   align-items: center;
 }
 
+.filter-section-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-bottom: 0.9rem;
+}
+
+.filter-section-label {
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary);
+}
+
 .folder-groups-bar {
   display: flex;
   flex-wrap: wrap;
   gap: 0.45rem;
-  margin-bottom: 1.1rem;
+}
+
+.season-chip.active {
+  background: linear-gradient(135deg, var(--accent-coral), var(--accent-magenta)) !important;
+  box-shadow: 0 3px 12px rgba(255, 107, 139, 0.3);
 }
 
 .folder-group-chip {
