@@ -19,9 +19,10 @@ export default async function handler(req, res) {
   const page = parseInt(req.query.page) || 1;
   const limit = parseInt(req.query.limit) || 15;
   const type = req.query.type || 'name';
+  const category = req.query.category || 'tamil';
 
   try {
-    const results = await searchMovies(q, page, limit, type);
+    const results = await searchMovies(q, page, limit, type, category);
     return res.status(200).json(results);
   } catch (err) {
     console.error('Vercel Search API Error:', err);

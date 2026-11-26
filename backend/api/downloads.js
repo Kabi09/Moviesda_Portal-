@@ -16,12 +16,13 @@ export default async function handler(req, res) {
 
   // Extract path parameter
   const path = req.query.path || req.query.movie_path;
+  const category = req.query.category || '';
   if (!path) {
     return res.status(400).json({ error: 'Missing path parameter' });
   }
 
   try {
-    const results = await extractDownloadLinks(path);
+    const results = await extractDownloadLinks(path, category);
     return res.status(200).json(results);
   } catch (err) {
     console.error('Vercel Downloads API Error:', err);

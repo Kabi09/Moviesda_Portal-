@@ -24,6 +24,7 @@ if (fs.existsSync(envPath)) {
 }
 
 export const BASE_URL = (process.env.BASE_URL || 'https://moviesda36.com').replace(/\/+$/, '');
+export const DUBBED_BASE_URL = (process.env.DUBBED_BASE_URL || 'https://isaidub.green').replace(/\/+$/, '');
 
 async function fetchPage(url) {
   try {
@@ -51,8 +52,8 @@ function extractYearFromTitle(title) {
   return m ? m[1] : '';
 }
 
-function derivePosterFromPath(href) {
-  if (!href) return undefined;
+function derivePosterFromPath(href, isDubbed = false) {
+  if (!href || isDubbed) return undefined;
   const slug = href.replace(/^\/+|\/+$/g, '');
   const cleanSlug = slug
     .replace(/-(?:tamil-)?(?:movie|web-series)(?:-moviesda)?(?:-download)?$/i, '')
@@ -61,13 +62,33 @@ function derivePosterFromPath(href) {
   return `${BASE_URL}/uploads/posters/${cleanSlug}.jpg`;
 }
 
-function parseMovieElements($, matches, normQuery = '', searchType = 'name') {
-  $('.f a').each((i, el) => {
+function normalizeForMatch(str) {
+  return (str || '')
+    .toLowerCase()
+    .replace(/[-_.:,'"!()[\]]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function compactForMatch(str) {
+  return (str || '')
+    .toLowerCase()
+    .replace(/[\s\-_.:,'"!()[\]]+/g, '');
+}
+
+const IGNORED_LINK_TEXTS = new Set(['sms', 'facebook', 'twitter', 'whatsapp', 'home', 'contact us', 'dmca', 'dmca policy', 'isaidub home', 'moviesda home', 'disclaimer']);
+
+function parseMovieElements($, matches, normQuery = '', searchType = 'name', siteBaseUrl = BASE_URL, isDubbed = false) {
+  const cleanQuerySpaced = normalizeForMatch(normQuery);
+  const cleanQueryCompact = compactForMatch(normQuery);
+
+  $('.f a, .folder a').each((i, el) => {
     const title = $(el).text().trim();
     const href = $(el).attr('href');
-    if (title && href) {
-      // Skip Moviesda directory navigation links wrapped in parentheses like "(Tamil 2025 Movies)"
+    if (title && href && !href.startsWith('#') && !href.startsWith('javascript:') && !href.startsWith('sms:') && !href.startsWith('whatsapp:')) {
       if (/^\(.*\)$/.test(title)) return;
+      if (IGNORED_LINK_TEXTS.has(title.toLowerCase())) return;
+      if (href === '/' || href.includes('/download/page/')) return;
 
       let isMatch = false;
       if (!normQuery) {
@@ -76,14 +97,19 @@ function parseMovieElements($, matches, normQuery = '', searchType = 'name') {
         const yearInTitle = extractYearFromTitle(title);
         isMatch = yearInTitle === normQuery || (normQuery.length === 2 && yearInTitle.endsWith(normQuery));
       } else {
-        // Movie Name search: strip the (YYYY) release year so numbers like 96, 24, 29 don't match release years
-        const cleanMovieName = stripYearFromTitle(title).toLowerCase();
+        // Movie Name / Collection / Webseries search: strip the (YYYY) release year so numbers like 96, 24, 29 don't match release years
+        const titleWithoutYear = stripYearFromTitle(title);
+        const movieSpaced = normalizeForMatch(titleWithoutYear);
+        const movieCompact = compactForMatch(titleWithoutYear);
+
         if (/^\d+$/.test(normQuery)) {
-          // For pure numeric movie names (e.g. 96, 29, 24), match as a standalone number/word in the movie title
           const numRegex = new RegExp(`(^|[^0-9])${normQuery}([^0-9]|$)`);
-          isMatch = numRegex.test(cleanMovieName);
+          isMatch = numRegex.test(movieSpaced);
         } else {
-          isMatch = cleanMovieName.includes(normQuery);
+          // Match both spaced ("spider man" / "spider-man") and compact ("spiderman") forms
+          isMatch =
+            (cleanQuerySpaced && movieSpaced.includes(cleanQuerySpaced)) ||
+            (cleanQueryCompact.length >= 3 && movieCompact.includes(cleanQueryCompact));
         }
       }
 
@@ -92,8 +118,9 @@ function parseMovieElements($, matches, normQuery = '', searchType = 'name') {
           matches.push({
             title,
             path: href,
-            url: href.startsWith('http') ? href : `${BASE_URL}${href}`,
-            poster: derivePosterFromPath(href)
+            url: href.startsWith('http') ? href : `${siteBaseUrl}${href}`,
+            poster: derivePosterFromPath(href, isDubbed),
+            category: isDubbed ? 'dubbed' : 'tamil'
           });
         }
       }
@@ -378,6 +405,282 @@ async function searchActorCollections(query) {
 }
 
 const ALL_YEAR_DIRS = ['2026', '2025', '2024', '2023', '2022', '2021', '2020', '2019', '2018', '2017', '2016', '2015', '2012'];
+const DUBBED_YEAR_DIRS = ['2026', '2025', '2024', '2023', '2022', '2021', '2020', '2019', '2018', '2017', '2016', '2015'];
+
+const dubbedPosterCache = new Map();
+
+function cleanTitleForPosterLookup(rawTitle) {
+  return (rawTitle || '')
+    .replace(/\s*\b(?:triology|trilogy|duology|quadrilogy|pentalogy|hexalogy|anthology|complete|dubbed|tamil|movie|movies|web\s*series|collections?)\b\s*/gi, ' ')
+    .replace(/[()[\]]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+async function fetchImdbPoster(title) {
+  if (!title) return undefined;
+  const cleanWithYear = cleanTitleForPosterLookup(title);
+  if (!cleanWithYear) return undefined;
+
+  if (dubbedPosterCache.has(cleanWithYear)) {
+    return dubbedPosterCache.get(cleanWithYear) || undefined;
+  }
+
+  const queryVariants = [cleanWithYear];
+  const withoutYear = cleanWithYear.replace(/\b(19|20)\d{2}\b/g, '').replace(/\s+/g, ' ').trim();
+  if (withoutYear && withoutYear !== cleanWithYear) {
+    queryVariants.push(withoutYear);
+  }
+
+  for (const q of queryVariants) {
+    try {
+      const res = await fetch(`https://v3.sg.media-imdb.com/suggestion/x/${encodeURIComponent(q)}.json`, {
+        headers: { 'User-Agent': 'Mozilla/5.0' }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const itemWithImg = data?.d?.find((item) => item?.i?.imageUrl);
+        if (itemWithImg?.i?.imageUrl) {
+          const posterUrl = itemWithImg.i.imageUrl.replace(/\._V1_.*\.jpg$/i, '._V1_QL75_UX380_.jpg');
+          dubbedPosterCache.set(cleanWithYear, posterUrl);
+          return posterUrl;
+        }
+      }
+    } catch (err) {
+      // Ignore individual poster lookup failure
+    }
+  }
+
+  dubbedPosterCache.set(cleanWithYear, null);
+  return undefined;
+}
+
+async function enrichDubbedPosters(movieList, concurrency = 45) {
+  if (!movieList || movieList.length === 0) return movieList;
+
+  // First attach any cached posters immediately
+  const uncached = [];
+  for (const movie of movieList) {
+    if (movie.poster) continue;
+    const key = cleanTitleForPosterLookup(movie.title);
+    if (dubbedPosterCache.has(key)) {
+      const cached = dubbedPosterCache.get(key);
+      if (cached) movie.poster = cached;
+    } else {
+      uncached.push(movie);
+    }
+  }
+
+  if (uncached.length === 0) return movieList;
+
+  console.error(`[Dubbed Posters] Fetching posters for ${uncached.length} dubbed titles (concurrency ${concurrency})...`);
+  for (let i = 0; i < uncached.length; i += concurrency) {
+    const batch = uncached.slice(i, i + concurrency);
+    await Promise.all(
+      batch.map(async (movie) => {
+        const poster = await fetchImdbPoster(movie.title);
+        if (poster) {
+          movie.poster = poster;
+        }
+      })
+    );
+  }
+
+  return movieList;
+}
+
+// Fetch all pages of an isaidub.green directory (supports ?get-page=N and /tamil-atoz-dubbed-movies/<letter>/<page>)
+async function fetchDubbedDirectoryPages(dirPath, normQuery = '', searchType = 'name', maxPages = 0) {
+  const normalizedPath = dirPath.startsWith('/') ? dirPath : `/${dirPath}`;
+  const baseDirUrl = `${DUBBED_BASE_URL}${normalizedPath}`;
+  const isAtoZ = normalizedPath.includes('/tamil-atoz-dubbed-movies/');
+  const collected = [];
+
+  try {
+    const firstHtml = await fetchPage(baseDirUrl);
+    const $first = cheerio.load(firstHtml);
+    let totalSitePages = parseInt($first('#totalPages').text().trim()) || 1;
+    if (totalSitePages <= 1) {
+      $first('.pagination a, .pgn a').each((i, el) => {
+        const num = parseInt($first(el).text().trim());
+        if (!isNaN(num) && num > totalSitePages) totalSitePages = num;
+      });
+    }
+
+    const pagesToFetch = maxPages > 0 ? Math.min(totalSitePages, maxPages) : totalSitePages;
+    parseMovieElements($first, collected, normQuery, searchType, DUBBED_BASE_URL, true);
+
+    if (pagesToFetch > 1) {
+      const pageNumbers = Array.from({ length: pagesToFetch - 1 }, (_, i) => i + 2);
+      const pageHtmls = await Promise.all(
+        pageNumbers.map((sp) => {
+          const pageUrl = isAtoZ
+            ? `${baseDirUrl.replace(/\/+$/, '')}/${sp}`
+            : `${baseDirUrl}?get-page=${sp}`;
+          return fetchPage(pageUrl).catch(() => '');
+        })
+      );
+      for (const spHtml of pageHtmls) {
+        if (spHtml) {
+          const $sp = cheerio.load(spHtml);
+          parseMovieElements($sp, collected, normQuery, searchType, DUBBED_BASE_URL, true);
+        }
+      }
+    }
+  } catch (err) {
+    console.error(`[Dubbed Directory] Failed fetching ${baseDirUrl}:`, err.message);
+  }
+
+  return collected;
+}
+
+export async function searchDubbedMovies(query, searchType = 'name') {
+  const normQuery = (query || '').toLowerCase().trim();
+  const mode = (searchType || 'name').toLowerCase().trim();
+  const filterQuery = !normQuery || normQuery === 'latest' || normQuery === 'all' ? '' : normQuery;
+
+  console.error(`[Dubbed Search] Mode='${mode}', Query='${query}' on ${DUBBED_BASE_URL}`);
+
+  if (mode === 'webseries') {
+    const series = await fetchDubbedDirectoryPages('/tamil-dubbed-web-series/', filterQuery, 'name');
+    if (filterQuery) sortMovieNameMatches(series, filterQuery);
+    await enrichDubbedPosters(series);
+    return {
+      movies: series,
+      page: 1,
+      limit: series.length,
+      total: series.length,
+      totalPages: 1,
+      hasMore: false,
+      baseUrl: DUBBED_BASE_URL,
+      category: 'dubbed'
+    };
+  }
+
+  if (mode === 'collection') {
+    const collections = await fetchDubbedDirectoryPages('/movie/tamil-dubbed-movies-collections/', filterQuery, 'name');
+    if (filterQuery) sortMovieNameMatches(collections, filterQuery);
+    await enrichDubbedPosters(collections);
+    return {
+      movies: collections,
+      page: 1,
+      limit: collections.length,
+      total: collections.length,
+      totalPages: 1,
+      hasMore: false,
+      baseUrl: DUBBED_BASE_URL,
+      category: 'dubbed'
+    };
+  }
+
+  if (mode === 'year') {
+    let targetYear = filterQuery || '2026';
+    if (/^\d{2}$/.test(targetYear)) {
+      const num = parseInt(targetYear, 10);
+      targetYear = num <= 30 ? `20${targetYear}` : `19${targetYear}`;
+    }
+
+    if (DUBBED_YEAR_DIRS.includes(targetYear)) {
+      const yearMovies = await fetchDubbedDirectoryPages(`/tamil-${targetYear}-dubbed-movies/`, '', 'name');
+      await enrichDubbedPosters(yearMovies);
+      return {
+        movies: yearMovies,
+        page: 1,
+        limit: yearMovies.length,
+        total: yearMovies.length,
+        totalPages: 1,
+        hasMore: false,
+        baseUrl: DUBBED_BASE_URL,
+        category: 'dubbed'
+      };
+    }
+
+    // For older years without a dedicated directory (e.g. 2005, 1999), scan A-Z or Hollywood directory by release year
+    const allHollywood = await fetchDubbedDirectoryPages('/tamil-dubbed-hollywood-movies/', targetYear, 'year');
+    await enrichDubbedPosters(allHollywood);
+    return {
+      movies: allHollywood,
+      page: 1,
+      limit: allHollywood.length,
+      total: allHollywood.length,
+      totalPages: 1,
+      hasMore: false,
+      baseUrl: DUBBED_BASE_URL,
+      category: 'dubbed'
+    };
+  }
+
+  // Default Dubbed 'name' search: unified search across A-Z, All Years, Collections (plus child movies inside matched collections), and Web Series
+  if (!filterQuery) {
+    const latestDubbed = await fetchDubbedDirectoryPages('/tamil-2026-dubbed-movies/', '', 'name');
+    await enrichDubbedPosters(latestDubbed);
+    return {
+      movies: latestDubbed,
+      page: 1,
+      limit: latestDubbed.length,
+      total: latestDubbed.length,
+      totalPages: 1,
+      hasMore: false,
+      baseUrl: DUBBED_BASE_URL,
+      category: 'dubbed'
+    };
+  }
+
+  const firstChar = filterQuery.charAt(0);
+  const isAlphaStart = /[a-z]/.test(firstChar);
+  let matches = [];
+
+  const dirPromises = [
+    ...DUBBED_YEAR_DIRS.map(yr => fetchDubbedDirectoryPages(`/tamil-${yr}-dubbed-movies/`, filterQuery, 'name')),
+    fetchDubbedDirectoryPages('/movie/tamil-dubbed-movies-collections/', filterQuery, 'name'),
+    fetchDubbedDirectoryPages('/tamil-dubbed-web-series/', filterQuery, 'name')
+  ];
+
+  if (isAlphaStart) {
+    dirPromises.unshift(fetchDubbedDirectoryPages(`/tamil-atoz-dubbed-movies/${firstChar}`, filterQuery, 'name'));
+    if (firstChar !== 't') {
+      dirPromises.push(fetchDubbedDirectoryPages('/tamil-atoz-dubbed-movies/t', filterQuery, 'name'));
+    }
+  }
+
+  const resultsArrays = await Promise.all(dirPromises);
+  const rawMatches = resultsArrays.flat();
+
+  // If any matched item is a Collection folder, expand its child movies so every movie in that collection appears in search results
+  const collectionFolders = rawMatches.filter(
+    (m) => m.path.includes('collections') || /collections?$/i.test(m.title)
+  );
+  if (collectionFolders.length > 0) {
+    const childArrays = await Promise.all(
+      collectionFolders.slice(0, 6).map((coll) =>
+        fetchDubbedDirectoryPages(coll.path, '', 'name', 1)
+      )
+    );
+    rawMatches.push(...childArrays.flat());
+  }
+
+  for (const item of rawMatches) {
+    if (!matches.some(m => m.path === item.path)) {
+      matches.push(item);
+    }
+  }
+
+  matches = deduplicateMoviesByTitle(matches);
+  sortMovieNameMatches(matches, filterQuery);
+  await enrichDubbedPosters(matches);
+
+  return {
+    movies: matches,
+    page: 1,
+    limit: matches.length,
+    total: matches.length,
+    totalPages: 1,
+    hasMore: false,
+    baseUrl: DUBBED_BASE_URL,
+    category: 'dubbed'
+  };
+}
 
 let cachedActorsList = null;
 
@@ -489,23 +792,53 @@ function findMatchingActor(actors, query) {
 }
 
 function sortMovieNameMatches(matches, normQuery) {
-  return matches.sort((a, b) => {
-    const nameA = stripYearFromTitle(a.title).toLowerCase().replace(/\s*\(movie\)\s*/g, '').trim();
-    const nameB = stripYearFromTitle(b.title).toLowerCase().replace(/\s*\(movie\)\s*/g, '').trim();
+  const qCompact = compactForMatch(normQuery);
+  const qSpaced = normalizeForMatch(normQuery);
 
-    const exactA = nameA === normQuery ? 1 : 0;
-    const exactB = nameB === normQuery ? 1 : 0;
+  return matches.sort((a, b) => {
+    const rawA = stripYearFromTitle(a.title).replace(/\s*\(movie\)\s*/gi, '').trim();
+    const rawB = stripYearFromTitle(b.title).replace(/\s*\(movie\)\s*/gi, '').trim();
+    const compactA = compactForMatch(rawA);
+    const compactB = compactForMatch(rawB);
+    const spacedA = normalizeForMatch(rawA);
+    const spacedB = normalizeForMatch(rawB);
+
+    // Put Collections folder slightly after individual movies so individual movies appear first in order
+    const isCollA = /collections?$/i.test(rawA) ? 1 : 0;
+    const isCollB = /collections?$/i.test(rawB) ? 1 : 0;
+
+    const exactA = compactA === qCompact || spacedA === qSpaced ? 1 : 0;
+    const exactB = compactB === qCompact || spacedB === qSpaced ? 1 : 0;
     if (exactA !== exactB) return exactB - exactA;
 
-    const startA = nameA.startsWith(normQuery) ? 1 : 0;
-    const startB = nameB.startsWith(normQuery) ? 1 : 0;
+    const startA = compactA.startsWith(qCompact) || spacedA.startsWith(qSpaced) ? 1 : 0;
+    const startB = compactB.startsWith(qCompact) || spacedB.startsWith(qSpaced) ? 1 : 0;
     if (startA !== startB) return startB - startA;
 
-    return nameA.length - nameB.length;
+    if (isCollA !== isCollB) return isCollA - isCollB;
+
+    return rawA.localeCompare(rawB, undefined, { numeric: true });
   });
 }
 
-export async function searchMovies(query, page = 1, limit = 15, searchType = 'name') {
+function deduplicateMoviesByTitle(matches) {
+  const seenKeys = new Set();
+  const result = [];
+  for (const m of matches) {
+    const year = extractYearFromTitle(m.title);
+    const cleanKey = `${compactForMatch(stripYearFromTitle(m.title))}_${year}`;
+    if (!seenKeys.has(cleanKey)) {
+      seenKeys.add(cleanKey);
+      result.push(m);
+    }
+  }
+  return result;
+}
+
+export async function searchMovies(query, page = 1, limit = 15, searchType = 'name', category = 'tamil') {
+  if ((category || 'tamil').toLowerCase().trim() === 'dubbed') {
+    return searchDubbedMovies(query, searchType);
+  }
   const normQuery = (query || '').toLowerCase().trim();
   const safePage = Math.max(1, parseInt(page) || 1);
   const safeLimit = Math.max(1, parseInt(limit) || 15);
@@ -660,14 +993,109 @@ export async function searchMovies(query, page = 1, limit = 15, searchType = 'na
   };
 }
 
-// Recursively find all download links starting from a movie page path/URL
-export async function extractDownloadLinks(moviePath) {
-  const startUrl = moviePath.startsWith('http') ? moviePath : `${BASE_URL}${moviePath}`;
+// Helper to resolve a dubbed file ID (from /download/page/<id>/ or dubpage.xyz) directly to final download & stream servers
+async function resolveDubbedFileServers(fileId, fallbackPageUrl = '') {
+  const resolvedServers = [];
+  let details = {};
+  try {
+    let dlPageUrl = `https://dubmv.xyz/download/file/${fileId}`;
+    let dlPageHtml = await fetchPage(dlPageUrl).catch(() => null);
+
+    if (!dlPageHtml && fallbackPageUrl) {
+      const gate1Html = await fetchPage(fallbackPageUrl).catch(() => null);
+      if (gate1Html) {
+        const $g1 = cheerio.load(gate1Html);
+        const step1Href = $g1('.dlink a').first().attr('href');
+        if (step1Href) {
+          const step1Url = new URL(step1Href, fallbackPageUrl).href;
+          const gate2Html = await fetchPage(step1Url).catch(() => null);
+          if (gate2Html) {
+            const $g2 = cheerio.load(gate2Html);
+            const step2Href = $g2('.dlink a').first().attr('href');
+            if (step2Href) {
+              dlPageUrl = new URL(step2Href, step1Url).href;
+              dlPageHtml = await fetchPage(dlPageUrl).catch(() => null);
+            }
+          }
+        }
+      }
+    }
+
+    if (dlPageHtml) {
+      const $dl = cheerio.load(dlPageHtml);
+      $dl('.details').each((i, el) => {
+        const text = $dl(el).text();
+        if (text.includes('File Name:')) details.fileName = text.replace('File Name:', '').trim();
+        else if (text.includes('File Size:')) details.fileSize = text.replace('File Size:', '').trim();
+        else if (text.includes('Duration:')) details.duration = text.replace('Duration:', '').trim();
+        else if (text.includes('Video Size:') || text.includes('Video Resolution:')) {
+          details.resolution = text.replace(/Video (?:Size|Resolution):/, '').trim();
+        } else if (text.includes('Format:')) details.format = text.replace(/.*Format:/, '').trim();
+      });
+
+      const shotImg = $dl('.albumcover img').attr('src');
+      if (shotImg) {
+        details.thumbnail = shotImg.startsWith('http') ? shotImg : `${DUBBED_BASE_URL}${shotImg}`;
+      }
+
+      $dl('.dlink a').each((i, el) => {
+        const name = $dl(el).text().trim();
+        const href = $dl(el).attr('href');
+        if (name && href) {
+          try {
+            resolvedServers.push({ name, url: new URL(href, dlPageUrl).href });
+          } catch (e) {
+            resolvedServers.push({ name, url: href });
+          }
+        }
+      });
+    }
+  } catch (err) {
+    console.error(`[Dubbed Resolver] Error resolving fileId ${fileId}:`, err.message);
+  }
+
+  if (!resolvedServers.some(s => s.name.toLowerCase().includes('watch'))) {
+    const streamUrl = `https://dub.onestream.today/stream/video/${fileId}`;
+    resolvedServers.push(
+      { name: 'Watch Online Server 1', url: streamUrl },
+      { name: 'Watch Online Server 2', url: streamUrl }
+    );
+  }
+
+  return { servers: resolvedServers, details };
+}
+
+function formatFolderBreadcrumb(breadcrumbs) {
+  if (!breadcrumbs || breadcrumbs.length === 0) return 'Main Files';
+  // Clean redundant prefixes to keep folder tabs readable (e.g. "Season 01 • 720p HD" or "The Matrix (1999) • 720p HD")
+  return breadcrumbs
+    .map((b) =>
+      b
+        .replace(/\s*Tamil\s*Dubbed\s*(?:Movie|Web\s*Series|Collections?)?\s*/gi, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+    )
+    .filter(Boolean)
+    .join(' › ');
+}
+
+// Recursively find all download links starting from a movie/collection/webseries page path/URL
+export async function extractDownloadLinks(moviePath, category = '') {
+  const isDubbed =
+    (category || '').toLowerCase() === 'dubbed' ||
+    moviePath.includes('isaidub') ||
+    moviePath.startsWith('/movie/') ||
+    moviePath.includes('dubbed');
+  const activeBaseUrl = isDubbed ? DUBBED_BASE_URL : BASE_URL;
+  const startUrl = moviePath.startsWith('http') ? moviePath : `${activeBaseUrl}${moviePath}`;
   const filesList = [];
+  const seenFileIds = new Set();
   const visited = new Set();
   let movieInfo = null;
+  let firstThumbnail = null;
+  let rootTitle = '';
 
-  async function traverse(url, isStartPage = false) {
+  async function traverse(url, isStartPage = false, breadcrumbs = []) {
     if (visited.has(url)) return;
     visited.add(url);
 
@@ -677,21 +1105,22 @@ export async function extractDownloadLinks(moviePath) {
       const $ = cheerio.load(html);
 
       if (isStartPage) {
+        const lineHeading = $('.line').eq(1).text().trim() || $('title').text().split('-')[0].trim();
+        rootTitle = lineHeading;
+
         // Scrape movie info from the start page if it exists
         const infoContainer = $('#movie-info');
         if (infoContainer.length > 0) {
           movieInfo = {};
           
-          // Poster image
           const imgEl = infoContainer.find('picture img, img').first();
           if (imgEl.length > 0) {
             const src = imgEl.attr('src');
             if (src) {
-              movieInfo.poster = src.startsWith('http') ? src : `${BASE_URL}${src}`;
+              movieInfo.poster = src.startsWith('http') ? src : `${activeBaseUrl}${src}`;
             }
           }
 
-          // Metadata fields
           infoContainer.find('.movie-info li').each((i, el) => {
             const strongText = $(el).find('strong').text().replace(':', '').trim().toLowerCase();
             const val = $(el).find('span').text().trim();
@@ -707,7 +1136,6 @@ export async function extractDownloadLinks(moviePath) {
             }
           });
 
-          // Synopsis
           const synopsisEl = infoContainer.find('.movie-synopsis');
           if (synopsisEl.length > 0) {
             movieInfo.synopsis = synopsisEl.text().replace(/synopsis:/i, '').trim();
@@ -715,7 +1143,64 @@ export async function extractDownloadLinks(moviePath) {
         }
       }
 
-      // Check if we are on a file description page (contains download server links)
+      // Fast path for isaidub.green inline file blocks (.mv-content with /download/page/<fileId>/)
+      const inlineFileItems = [];
+      $('.mv-content').each((i, el) => {
+        const linkEl = $(el).find('a[href*="/download/page/"]').first();
+        const href = linkEl.attr('href');
+        if (!href) return;
+        const idMatch = href.match(/\/download\/page\/(\d+)/i);
+        const fileId = idMatch ? idMatch[1] : null;
+        if (!fileId || seenFileIds.has(fileId)) return;
+        seenFileIds.add(fileId);
+
+        const rawTitle = linkEl.text().trim();
+        let fileSize = '';
+        let format = '';
+        $(el).find('li').each((_, li) => {
+          const t = $(li).text().trim();
+          if (t.includes('File Size:')) fileSize = t.replace('File Size:', '').trim();
+          else if (t.includes('Download Format:')) format = t.replace('Download Format:', '').trim();
+        });
+
+        const shotSrc = $(el).find('img').attr('src');
+        if (shotSrc && !firstThumbnail) {
+          firstThumbnail = shotSrc.startsWith('http') ? shotSrc : `${activeBaseUrl}${shotSrc}`;
+        }
+
+        inlineFileItems.push({
+          fileId,
+          rawTitle,
+          fileSize,
+          format,
+          pageUrl: href.startsWith('http') ? href : `${activeBaseUrl}${href}`,
+          folderGroup: formatFolderBreadcrumb(breadcrumbs)
+        });
+      });
+
+      if (inlineFileItems.length > 0) {
+        const resolvedInline = await Promise.all(
+          inlineFileItems.map(async (item) => {
+            const { servers, details } = await resolveDubbedFileServers(item.fileId, item.pageUrl);
+            if (details.thumbnail && !firstThumbnail) {
+              firstThumbnail = details.thumbnail;
+            }
+            return {
+              fileName: details.fileName || item.rawTitle,
+              fileSize: details.fileSize || item.fileSize,
+              duration: details.duration || '',
+              resolution: details.resolution || '',
+              format: details.format || item.format,
+              folderGroup: item.folderGroup,
+              servers,
+              pageUrl: item.pageUrl
+            };
+          })
+        );
+        filesList.push(...resolvedInline);
+      }
+
+      // Check if we are on a dedicated file description page (contains .songinfo or .dlink)
       if ($('.songinfo').length > 0 || $('.dlink').length > 0) {
         console.error(`[Crawler] Found details page: ${url}`);
         let fileName = "";
@@ -732,12 +1217,17 @@ export async function extractDownloadLinks(moviePath) {
             fileSize = text.replace('File Size:', '').trim();
           } else if (text.includes('Duration:')) {
             duration = text.replace('Duration:', '').trim();
-          } else if (text.includes('Video Resolution:')) {
-            resolution = text.replace('Video Resolution:', '').trim();
-          } else if (text.includes('Download Format:')) {
-            format = text.replace('Download Format:', '').trim();
+          } else if (text.includes('Video Resolution:') || text.includes('Video Size:')) {
+            resolution = text.replace(/Video (?:Resolution|Size):/, '').trim();
+          } else if (text.includes('Download Format:') || text.includes('Format:')) {
+            format = text.replace(/.*Format:/, '').trim();
           }
         });
+
+        const shotSrc = $('.albumcover img').attr('src') || '';
+        if (shotSrc && !firstThumbnail) {
+          firstThumbnail = shotSrc.startsWith('http') ? shotSrc : `${activeBaseUrl}${shotSrc}`;
+        }
 
         let servers = [];
         $('.dlink a').each((i, el) => {
@@ -745,7 +1235,6 @@ export async function extractDownloadLinks(moviePath) {
           const href = $(el).attr('href');
           if (href) {
             try {
-              // Resolve relative URLs using the parent page URL
               const resolvedUrl = new URL(href, url).href;
               servers.push({ name, url: resolvedUrl });
             } catch (e) {
@@ -754,30 +1243,44 @@ export async function extractDownloadLinks(moviePath) {
           }
         });
 
-        // Resolve intermediate download pages directly to final Download Server 1/2 and Watch Online Server 1/2 URLs
         let fileId = null;
         for (const srv of servers) {
-          const match = srv.url.match(/\/download\/(?:file|page)\/(\d+)/i);
+          const match = srv.url.match(/\/download\/(?:file|page|view)\/(\d+)/i);
           if (match) {
             fileId = match[1];
             break;
           }
         }
         if (!fileId) {
-          const shotSrc = $('.albumcover img').attr('src') || '';
+          const urlMatch = url.match(/\/download\/page\/(\d+)/i);
+          if (urlMatch) fileId = urlMatch[1];
+        }
+        if (!fileId && shotSrc) {
           const shotMatch = shotSrc.match(/\/uploads\/shots\/(\d+)-/i);
-          if (shotMatch) {
-            fileId = shotMatch[1];
-          }
+          if (shotMatch) fileId = shotMatch[1];
         }
 
+        if (fileId && seenFileIds.has(fileId)) {
+          return;
+        }
         if (fileId) {
+          seenFileIds.add(fileId);
+        }
+
+        if (fileId && isDubbed) {
+          const { servers: dubServers, details } = await resolveDubbedFileServers(fileId, url);
+          if (dubServers.length > 0) servers = dubServers;
+          fileName = fileName || details.fileName || '';
+          fileSize = fileSize || details.fileSize || '';
+          duration = duration || details.duration || '';
+          resolution = resolution || details.resolution || '';
+          format = format || details.format || '';
+        } else if (fileId) {
           const resolvedServers = [];
           try {
             let dlPageUrl = `https://movies.downloadpage.xyz/download/page/${fileId}`;
             let dlPageHtml = await fetchPage(dlPageUrl).catch(() => null);
 
-            // If direct downloadpage URL changed, follow the gateway page link dynamically
             if (!dlPageHtml && servers[0]?.url) {
               const gateHtml = await fetchPage(servers[0].url);
               const $gate = cheerio.load(gateHtml);
@@ -826,34 +1329,72 @@ export async function extractDownloadLinks(moviePath) {
           duration,
           resolution,
           format,
+          folderGroup: formatFolderBreadcrumb(breadcrumbs),
           servers,
           pageUrl: url
         });
         return;
       }
 
-      // Otherwise, extract subfolders and file links inside .f and .folder
+      // Extract subfolders and file links inside .f and .folder and traverse them in parallel
       const linksToFollow = [];
-      $('.f a, .folder a').each((i, el) => {
+      $('.folder a, .f a').each((i, el) => {
         const href = $(el).attr('href');
-        if (href) {
-          const absoluteUrl = href.startsWith('http') ? href : `${BASE_URL}${href}`;
-          if (absoluteUrl !== BASE_URL && absoluteUrl !== BASE_URL + '/' && !absoluteUrl.includes('telegram')) {
-            linksToFollow.push(absoluteUrl);
+        const linkText = $(el).text().trim();
+        if (href && !href.startsWith('#') && !href.startsWith('javascript:') && !href.startsWith('sms:') && !href.startsWith('whatsapp:')) {
+          if (IGNORED_LINK_TEXTS.has(linkText.toLowerCase())) return;
+          // If this link is already handled by inline .mv-content (/download/page/<id>/), skip re-fetching
+          if (inlineFileItems.length > 0 && href.includes('/download/page/')) return;
+          const absoluteUrl = href.startsWith('http') ? href : `${activeBaseUrl}${href}`;
+          if (
+            absoluteUrl !== activeBaseUrl &&
+            absoluteUrl !== activeBaseUrl + '/' &&
+            !absoluteUrl.includes('telegram') &&
+            !linksToFollow.some(l => l.url === absoluteUrl)
+          ) {
+            linksToFollow.push({
+              url: absoluteUrl,
+              label: linkText
+            });
           }
         }
       });
 
-      for (const nextUrl of linksToFollow) {
-        await traverse(nextUrl);
-      }
+      await Promise.all(
+        linksToFollow.map((nextItem) =>
+          traverse(nextItem.url, false, [...breadcrumbs, nextItem.label])
+        )
+      );
 
     } catch (error) {
       console.error(`[Crawler] Error traversing ${url}:`, error);
     }
   }
 
-  await traverse(startUrl, true);
+  await traverse(startUrl, true, []);
+
+  if (!movieInfo && (firstThumbnail || rootTitle)) {
+    const imdbPoster = isDubbed && rootTitle ? await fetchImdbPoster(rootTitle) : undefined;
+    movieInfo = {
+      title: rootTitle,
+      poster: imdbPoster || firstThumbnail || undefined,
+      language: isDubbed ? 'Tamil Dubbed' : 'Tamil',
+      quality: 'HD'
+    };
+  } else if (movieInfo && !movieInfo.poster) {
+    const imdbPoster = isDubbed && (movieInfo.title || rootTitle)
+      ? await fetchImdbPoster(movieInfo.title || rootTitle)
+      : undefined;
+    movieInfo.poster = imdbPoster || firstThumbnail || undefined;
+  }
+
+  // Sort downloads naturally by folderGroup and fileName (so Episode 01, Episode 02, ... are in clean order)
+  filesList.sort((a, b) => {
+    const groupCmp = (a.folderGroup || '').localeCompare(b.folderGroup || '', undefined, { numeric: true });
+    if (groupCmp !== 0) return groupCmp;
+    return (a.fileName || '').localeCompare(b.fileName || '', undefined, { numeric: true });
+  });
+
   return {
     movieInfo,
     downloads: filesList

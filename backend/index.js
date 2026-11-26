@@ -158,8 +158,9 @@ async function main() {
         const page = parseInt(url.searchParams.get('page')) || 1;
         const limit = parseInt(url.searchParams.get('limit')) || 15;
         const type = url.searchParams.get('type') || 'name';
+        const category = url.searchParams.get('category') || 'tamil';
         try {
-          const results = await searchMovies(q, page, limit, type);
+          const results = await searchMovies(q, page, limit, type, category);
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify(results));
         } catch (err) {
@@ -172,13 +173,14 @@ async function main() {
       // REST API Downloads endpoint
       if (req.method === 'GET' && url.pathname === '/api/downloads') {
         const pathParam = url.searchParams.get('path');
+        const category = url.searchParams.get('category') || '';
         if (!pathParam) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'Missing path parameter' }));
           return;
         }
         try {
-          const results = await extractDownloadLinks(pathParam);
+          const results = await extractDownloadLinks(pathParam, category);
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify(results));
         } catch (err) {

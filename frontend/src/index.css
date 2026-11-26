@@ -1139,9 +1139,55 @@ main {
   gap: 1rem;
 }
 
+/* Main Category Toggle (Tamil vs Dubbed) */
+.main-category-toggle {
+  display: inline-flex;
+  align-items: center;
+  background: rgba(13, 17, 27, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 100px;
+  padding: 0.35rem;
+  gap: 0.4rem;
+  box-shadow: var(--shadow-premium);
+}
+
+.main-category-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.6rem 1.5rem;
+  border-radius: 100px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: 0.98rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: var(--transition-smooth);
+}
+
+.main-category-btn:hover:not(:disabled):not(.active) {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.main-category-btn.active {
+  background: linear-gradient(135deg, var(--accent-violet), var(--accent-magenta), var(--accent-coral));
+  color: #ffffff;
+  box-shadow: 0 4px 18px rgba(217, 70, 239, 0.35);
+}
+
+.main-category-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* Search Mode Small Tab Toggle */
 .search-mode-tabs {
   display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: center;
   align-items: center;
   background: var(--bg-card);
   border: 1px solid var(--border-glass);
@@ -1149,6 +1195,108 @@ main {
   padding: 0.28rem;
   gap: 0.3rem;
   box-shadow: var(--shadow-premium);
+}
+
+/* Folder Group Chips & Episode Filter inside Modal */
+.downloads-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.8rem;
+  margin-bottom: 1rem;
+}
+
+.modal-file-filter-box {
+  display: flex;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border-glass);
+  border-radius: 100px;
+  padding: 0.35rem 0.8rem;
+  gap: 0.45rem;
+  min-width: 240px;
+  flex: 1;
+  max-width: 320px;
+}
+
+.modal-filter-icon {
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.modal-file-filter-input {
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 0.85rem;
+  width: 100%;
+}
+
+.modal-filter-clear {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+}
+
+.folder-groups-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-bottom: 1.2rem;
+  max-height: 135px;
+  overflow-y: auto;
+  padding: 0.55rem;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border-glass);
+  border-radius: 12px;
+}
+
+.folder-group-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.38rem 0.8rem;
+  border-radius: 8px;
+  border: 1px solid var(--border-glass);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: var(--transition-smooth);
+}
+
+.folder-group-chip:hover:not(.active) {
+  background: rgba(255, 255, 255, 0.09);
+  color: var(--text-primary);
+}
+
+.folder-group-chip.active {
+  background: linear-gradient(135deg, var(--accent-violet), var(--accent-magenta));
+  color: #ffffff;
+  border-color: transparent;
+  font-weight: 600;
+}
+
+.file-folder-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  align-self: flex-start;
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: #c4b5fd;
+  background: rgba(139, 92, 246, 0.14);
+  border: 1px solid rgba(139, 92, 246, 0.28);
+  padding: 0.22rem 0.6rem;
+  border-radius: 6px;
 }
 
 .search-mode-tab {
