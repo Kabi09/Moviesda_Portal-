@@ -236,6 +236,22 @@ main {
 }
 
 /* Movie Results List */
+.results-section {
+  scroll-margin-top: 1.5rem;
+  animation: resultsFadeSlideIn 0.45s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes resultsFadeSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 .results-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));

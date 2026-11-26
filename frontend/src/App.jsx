@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { 
   Search, 
   Film, 
@@ -40,12 +40,26 @@ export default function App() {
   const [searched, setSearched] = useState(false);
   const [actors, setActors] = useState([]);
   const [selectedActor, setSelectedActor] = useState(null);
+  const resultsSectionRef = useRef(null);
+  const shouldScrollToResultsRef = useRef(false);
 
-  const fetchMovies = async (searchQuery, targetPage = 1, mode = searchType) => {
+  const scrollToMoviesList = () => {
+    setTimeout(() => {
+      if (resultsSectionRef.current) {
+        resultsSectionRef.current.scrollIntoView({
+          behavior: 'smooth',
+          block: 'start'
+        });
+      }
+    }, 80);
+  };
+
+  const fetchMovies = async (searchQuery, targetPage = 1, mode = searchType, autoScroll = false) => {
     setLoadingSearch(true);
     setError('');
     setSearched(true);
     setMovies([]);
+    shouldScrollToResultsRef.current = autoScroll;
 
     try {
       const res = await fetch(
@@ -55,12 +69,15 @@ export default function App() {
         throw new Error(`Server returned status: ${res.status}`);
       }
       const data = await res.json();
+      let loadedMovies = [];
       if (Array.isArray(data)) {
-        setMovies(data.slice(0, MOVIES_PER_PAGE));
+        loadedMovies = data.slice(0, MOVIES_PER_PAGE);
+        setMovies(loadedMovies);
         setHasMore(data.length > MOVIES_PER_PAGE);
         setTotalPages(1);
       } else {
-        setMovies(data.movies || []);
+        loadedMovies = data.movies || [];
+        setMovies(loadedMovies);
         setHasMore(Boolean(data.hasMore));
         setTotalPages(data.totalPages || 1);
         if (data.actors) {
@@ -85,7 +102,14 @@ export default function App() {
   };
 
   useEffect(() => {
-    fetchMovies('latest', 1, 'name');
+    if (!loadingSearch && movies.length > 0 && shouldScrollToResultsRef.current) {
+      shouldScrollToResultsRef.current = false;
+      scrollToMoviesList();
+    }
+  }, [loadingSearch, movies]);
+
+  useEffect(() => {
+    fetchMovies('latest', 1, 'name', false);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSearch = async (e) => {
@@ -95,19 +119,20 @@ export default function App() {
       window.umami.track(`Movie: ${cleanQuery}`, { name: cleanQuery, type: searchType });
     }
     const targetQuery = cleanQuery || (searchType === 'actor' ? (selectedActor?.name || 'Vijay') : 'latest');
-    await fetchMovies(targetQuery, 1, searchType);
+    await fetchMovies(targetQuery, 1, searchType, searchType === 'actor' || Boolean(cleanQuery));
   };
 
   const handleTabChange = async (newType) => {
     if (newType === searchType) return;
     setSearchType(newType);
-    const cleanQuery = query.trim();
+    setQuery('');
     if (newType === 'actor') {
-      await fetchMovies(cleanQuery || selectedActor?.name || 'Vijay', 1, 'actor');
-    } else if (cleanQuery) {
-      await fetchMovies(cleanQuery, 1, newType);
-    } else if (activeSearchType === 'actor') {
-      await fetchMovies('latest', 1, newType);
+      await fetchMovies('Vijay', 1, 'actor', false);
+    } else {
+      setSelectedActor(null);
+      if (activeQuery !== 'latest' || activeSearchType === 'actor') {
+        await fetchMovies('latest', 1, newType, false);
+      }
     }
   };
 
@@ -117,7 +142,7 @@ export default function App() {
     if (typeof window !== 'undefined' && window.umami) {
       window.umami.track(`Actor: ${actor.name}`, { actor: actor.name, type: 'actor' });
     }
-    await fetchMovies(actor.path, 1, 'actor');
+    await fetchMovies(actor.path, 1, 'actor', true);
   };
 
   const handleClearSearch = async () => {
@@ -125,22 +150,20 @@ export default function App() {
     setSelectedActor(null);
     setSearchType('name');
     if (activeQuery !== 'latest' || activeSearchType !== 'name') {
-      await fetchMovies('latest', 1, 'name');
+      await fetchMovies('latest', 1, 'name', false);
     }
   };
 
   const handleNextPage = async () => {
     if (loadingSearch || !hasMore) return;
     const nextPage = page + 1;
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-    await fetchMovies(activeQuery, nextPage, activeSearchType);
+    await fetchMovies(activeQuery, nextPage, activeSearchType, true);
   };
 
   const handlePrevPage = async () => {
     if (loadingSearch || page <= 1) return;
     const prevPage = page - 1;
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-    await fetchMovies(activeQuery, prevPage, activeSearchType);
+    await fetchMovies(activeQuery, prevPage, activeSearchType, true);
   };
 
   const handleFetchDownloads = async (movie) => {
@@ -351,7 +374,7 @@ export default function App() {
         )}
 
         {!loadingSearch && movies.length > 0 && (
-          <section>
+          <section ref={resultsSectionRef} className="results-section">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', flexWrap: 'wrap', gap: '0.5rem' }}>
               <h2 style={{ fontSize: '1.4rem', opacity: 0.9 }}>
                 {activeSearchType === 'actor' && selectedActor
