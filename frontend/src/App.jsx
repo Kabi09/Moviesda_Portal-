@@ -2,10 +2,10 @@ import { useState, useEffect } from 'react';
 import { 
   Search, 
   Film, 
+  Calendar,
   Download, 
   Play,
   ExternalLink, 
-  
   X, 
   AlertCircle, 
   HardDrive, 
@@ -23,7 +23,9 @@ const MOVIES_PER_PAGE = 15;
 
 export default function App() {
   const [query, setQuery] = useState('');
+  const [searchType, setSearchType] = useState('name'); // 'name' (default) | 'year'
   const [activeQuery, setActiveQuery] = useState('latest');
+  const [activeSearchType, setActiveSearchType] = useState('name');
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [hasMore, setHasMore] = useState(false);
@@ -36,7 +38,7 @@ export default function App() {
   const [error, setError] = useState('');
   const [searched, setSearched] = useState(false);
 
-  const fetchMovies = async (searchQuery, targetPage = 1) => {
+  const fetchMovies = async (searchQuery, targetPage = 1, mode = searchType) => {
     setLoadingSearch(true);
     setError('');
     setSearched(true);
@@ -44,7 +46,7 @@ export default function App() {
 
     try {
       const res = await fetch(
-        `${API_BASE}/search?q=${encodeURIComponent(searchQuery)}&page=${targetPage}&limit=${MOVIES_PER_PAGE}`
+        `${API_BASE}/search?q=${encodeURIComponent(searchQuery)}&page=${targetPage}&limit=${MOVIES_PER_PAGE}&type=${encodeURIComponent(mode)}`
       );
       if (!res.ok) {
         throw new Error(`Server returned status: ${res.status}`);
@@ -58,9 +60,13 @@ export default function App() {
         setMovies(data.movies || []);
         setHasMore(Boolean(data.hasMore));
         setTotalPages(data.totalPages || 1);
+        if (data.baseUrl) {
+          console.log('BASE_URL:', data.baseUrl);
+        }
       }
       setPage(targetPage);
       setActiveQuery(searchQuery);
+      setActiveSearchType(mode);
     } catch (err) {
       console.error('Search error:', err);
       setError('Failed to fetch movies. Make sure the backend server is running.');
@@ -70,31 +76,40 @@ export default function App() {
   };
 
   useEffect(() => {
-    fetchMovies('latest', 1);
-  }, []);
+    fetchMovies('latest', 1, 'name');
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSearch = async (e) => {
     e?.preventDefault();
     const cleanQuery = query.trim();
     if (e && cleanQuery && typeof window !== 'undefined' && window.umami) {
-      window.umami.track(`Movie: ${cleanQuery}`, { name: cleanQuery });
+      window.umami.track(`Movie: ${cleanQuery}`, { name: cleanQuery, type: searchType });
     }
     const targetQuery = cleanQuery || 'latest';
-    await fetchMovies(targetQuery, 1);
+    await fetchMovies(targetQuery, 1, searchType);
+  };
+
+  const handleTabChange = async (newType) => {
+    if (newType === searchType) return;
+    setSearchType(newType);
+    const cleanQuery = query.trim();
+    if (cleanQuery) {
+      await fetchMovies(cleanQuery, 1, newType);
+    }
   };
 
   const handleNextPage = async () => {
     if (loadingSearch || !hasMore) return;
     const nextPage = page + 1;
     window.scrollTo({ top: 0, behavior: 'smooth' });
-    await fetchMovies(activeQuery, nextPage);
+    await fetchMovies(activeQuery, nextPage, activeSearchType);
   };
 
   const handlePrevPage = async () => {
     if (loadingSearch || page <= 1) return;
     const prevPage = page - 1;
     window.scrollTo({ top: 0, behavior: 'smooth' });
-    await fetchMovies(activeQuery, prevPage);
+    await fetchMovies(activeQuery, prevPage, activeSearchType);
   };
 
   const handleFetchDownloads = async (movie) => {
@@ -156,22 +171,52 @@ export default function App() {
         {/* Search Bar Section */}
         <section className="search-section">
           <div className="search-container-vertical">
+            {/* Small Tab Toggle: Movie Name (Default) vs Year Search */}
+            <div className="search-mode-tabs" role="tablist" aria-label="Search Mode">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={searchType === 'name'}
+                className={`search-mode-tab ${searchType === 'name' ? 'active' : ''}`}
+                onClick={() => handleTabChange('name')}
+                disabled={loadingSearch || loadingDownloads}
+              >
+                <Film size={15} />
+                Movie Name
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={searchType === 'year'}
+                className={`search-mode-tab ${searchType === 'year' ? 'active' : ''}`}
+                onClick={() => handleTabChange('year')}
+                disabled={loadingSearch || loadingDownloads}
+              >
+                <Calendar size={15} />
+                Year Search
+              </button>
+            </div>
+
             <form className="search-bar-wrapper" onSubmit={handleSearch}>
               <Search className="search-icon" size={22} />
               <input
                 type="text"
                 className="search-input"
-                placeholder="Search movies....."
+                placeholder={
+                  searchType === 'year'
+                    ? 'Search by release year (e.g. 2026, 2025, 2018)...'
+                    : 'Search movie name (e.g. Dude, 96, 24, 29)...'
+                }
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 disabled={loadingSearch || loadingDownloads}
               />
               <button type="submit" className="search-button" disabled={loadingSearch}>
-                {loadingSearch ? 'Searching...' : 'Search Movie'}
+                {loadingSearch ? 'Searching...' : searchType === 'year' ? 'Search Year' : 'Search Movie'}
               </button>
             </form>
             <p className="disclaimer-text front-disclaimer">
-              * Please enter the <span className="highlight-disclaimer">correct movie spelling</span> to get the correct result.
+              * Please enter the <span className="highlight-disclaimer">correct {searchType === 'year' ? 'release year' : 'movie spelling'}</span> to get the correct result.
             </p>
           </div>
         </section>
@@ -207,7 +252,12 @@ export default function App() {
           <section>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', flexWrap: 'wrap', gap: '0.5rem' }}>
               <h2 style={{ fontSize: '1.4rem', opacity: 0.9 }}>
-                {activeQuery === 'latest' ? 'Latest Movies' : `Search Results for "${activeQuery}"`} ({movies.length})
+                {activeQuery === 'latest'
+                  ? 'Latest Movies'
+                  : activeSearchType === 'year'
+                  ? `Year Results for "${activeQuery}"`
+                  : `Movie Results for "${activeQuery}"`}{' '}
+                ({movies.length})
               </h2>
               {totalPages > 1 && (
                 <span style={{ fontSize: '0.92rem', color: 'var(--text-secondary)' }}>

@@ -157,8 +157,9 @@ async function main() {
         const q = url.searchParams.get('q') || 'latest';
         const page = parseInt(url.searchParams.get('page')) || 1;
         const limit = parseInt(url.searchParams.get('limit')) || 15;
+        const type = url.searchParams.get('type') || 'name';
         try {
-          const results = await searchMovies(q, page, limit);
+          const results = await searchMovies(q, page, limit, type);
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify(results));
         } catch (err) {

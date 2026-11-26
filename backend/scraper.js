@@ -23,7 +23,7 @@ if (fs.existsSync(envPath)) {
   }
 }
 
-const BASE_URL = (process.env.BASE_URL || 'https://moviesda36.com').replace(/\/+$/, '');
+export const BASE_URL = (process.env.BASE_URL || 'https://moviesda36.com').replace(/\/+$/, '');
 
 async function fetchPage(url) {
   try {
@@ -42,12 +42,39 @@ async function fetchPage(url) {
   }
 }
 
-function parseMovieElements($, matches, normQuery = '') {
+function stripYearFromTitle(title) {
+  return title.replace(/\s*\(\d{4}\)\s*/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function extractYearFromTitle(title) {
+  const m = title.match(/\((\d{4})\)/);
+  return m ? m[1] : '';
+}
+
+function parseMovieElements($, matches, normQuery = '', searchType = 'name') {
   $('.f a').each((i, el) => {
     const title = $(el).text().trim();
     const href = $(el).attr('href');
     if (title && href) {
-      if (!normQuery || title.toLowerCase().includes(normQuery)) {
+      let isMatch = false;
+      if (!normQuery) {
+        isMatch = true;
+      } else if (searchType === 'year') {
+        const yearInTitle = extractYearFromTitle(title);
+        isMatch = yearInTitle === normQuery || (normQuery.length === 2 && yearInTitle.endsWith(normQuery));
+      } else {
+        // Movie Name search: strip the (YYYY) release year so numbers like 96, 24, 29 don't match release years
+        const cleanMovieName = stripYearFromTitle(title).toLowerCase();
+        if (/^\d+$/.test(normQuery)) {
+          // For pure numeric movie names (e.g. 96, 29, 24), match as a standalone number/word in the movie title
+          const numRegex = new RegExp(`(^|[^0-9])${normQuery}([^0-9]|$)`);
+          isMatch = numRegex.test(cleanMovieName);
+        } else {
+          isMatch = cleanMovieName.includes(normQuery);
+        }
+      }
+
+      if (isMatch) {
         if (!matches.some(m => m.path === href)) {
           matches.push({
             title,
@@ -138,11 +165,12 @@ async function fetchYearMoviesPaginated(year, page = 1, limit = 15) {
       limit,
       totalPages: totalUiPages,
       total: estimatedTotal,
-      hasMore
+      hasMore,
+      baseUrl: BASE_URL
     };
   } catch (error) {
     console.error(`[Year/Latest] Failed fetching year ${year}:`, error);
-    return { movies: [], page, limit, totalPages: 1, hasMore: false };
+    return { movies: [], page, limit, totalPages: 1, hasMore: false, baseUrl: BASE_URL };
   }
 }
 
@@ -195,34 +223,46 @@ async function searchMoviesAlphabetical(query) {
   return matches;
 }
 
-// Fallback search across recent years (2026, 2025, 2024)
-async function searchMoviesFallback(query) {
+// Fallback search across year directories
+async function searchMoviesFallback(query, years = ['2026', '2025', '2024'], maxPagesPerYear = 5, searchType = 'name') {
   const normQuery = query.toLowerCase().trim();
   const matches = [];
-  const years = ['2026', '2025', '2024'];
-  console.error(`[Fallback] Querying recent year directories: ${years.join(', ')}`);
+  console.error(`[Fallback] Querying year directories (${years.join(', ')})...`);
 
-  for (const year of years) {
-    const startUrl = `${BASE_URL}/tamil-${year}-movies/`;
-    try {
-      const html = await fetchPage(startUrl);
-      const $ = cheerio.load(html);
+  await Promise.all(
+    years.map(async (year) => {
+      const startUrl = `${BASE_URL}/tamil-${year}-movies/`;
+      try {
+        const html = await fetchPage(startUrl);
+        const $ = cheerio.load(html);
 
-      const totalPagesText = $('#totalPages').text().trim();
-      const totalPages = parseInt(totalPagesText) || 1;
+        const totalPagesText = $('#totalPages').text().trim();
+        const totalPages = parseInt(totalPagesText) || 1;
+        const limitPages = maxPagesPerYear ? Math.min(totalPages, maxPagesPerYear) : totalPages;
 
-      parseMovieElements($, matches, normQuery);
+        parseMovieElements($, matches, normQuery, searchType);
 
-      for (let page = 2; page <= Math.min(totalPages, 3); page++) {
-        const pageUrl = `${BASE_URL}/tamil-${year}-movies/?page=${page}`;
-        const pageHtml = await fetchPage(pageUrl);
-        const page$ = cheerio.load(pageHtml);
-        parseMovieElements(page$, matches, normQuery);
+        const pagePromises = [];
+        for (let page = 2; page <= limitPages; page++) {
+          const pageUrl = `${BASE_URL}/tamil-${year}-movies/?page=${page}`;
+          pagePromises.push(
+            (async () => {
+              try {
+                const pageHtml = await fetchPage(pageUrl);
+                const page$ = cheerio.load(pageHtml);
+                parseMovieElements(page$, matches, normQuery, searchType);
+              } catch (err) {
+                console.error(`[Fallback] Failed year ${year} page ${page}:`, err.message);
+              }
+            })()
+          );
+        }
+        await Promise.all(pagePromises);
+      } catch (error) {
+        console.error(`[Fallback] Failed searching directory for year ${year}:`, error.message);
       }
-    } catch (error) {
-      console.error(`[Fallback] Failed searching directory for year ${year}:`, error);
-    }
-  }
+    })
+  );
 
   return matches;
 }
@@ -331,52 +371,144 @@ async function searchActorCollections(query) {
   return matches;
 }
 
-export async function searchMovies(query, page = 1, limit = 15) {
+const ALL_YEAR_DIRS = ['2026', '2025', '2024', '2023', '2022', '2021', '2020', '2019', '2018', '2017', '2016', '2015', '2012'];
+
+function sortMovieNameMatches(matches, normQuery) {
+  return matches.sort((a, b) => {
+    const nameA = stripYearFromTitle(a.title).toLowerCase().replace(/\s*\(movie\)\s*/g, '').trim();
+    const nameB = stripYearFromTitle(b.title).toLowerCase().replace(/\s*\(movie\)\s*/g, '').trim();
+
+    const exactA = nameA === normQuery ? 1 : 0;
+    const exactB = nameB === normQuery ? 1 : 0;
+    if (exactA !== exactB) return exactB - exactA;
+
+    const startA = nameA.startsWith(normQuery) ? 1 : 0;
+    const startB = nameB.startsWith(normQuery) ? 1 : 0;
+    if (startA !== startB) return startB - startA;
+
+    return nameA.length - nameB.length;
+  });
+}
+
+export async function searchMovies(query, page = 1, limit = 15, searchType = 'name') {
   const normQuery = (query || '').toLowerCase().trim();
   const safePage = Math.max(1, parseInt(page) || 1);
   const safeLimit = Math.max(1, parseInt(limit) || 15);
+  const mode = (searchType || 'name').toLowerCase().trim();
 
-  // If initial load ('latest' or empty) or a 4-digit year search (e.g. '2026', '2025')
+  // Initial load ('latest' or empty) shows latest 2026 movies
   if (!normQuery || normQuery === 'latest') {
     return fetchYearMoviesPaginated('2026', safePage, safeLimit);
   }
 
-  if (/^\d{4}$/.test(normQuery)) {
-    return fetchYearMoviesPaginated(normQuery, safePage, safeLimit);
-  }
-
-  console.error(`[Search] Running parallel search for '${query}' (page ${safePage}, limit ${safeLimit})...`);
-  
-  const [alphabeticalMatches, actorMatches, fallbackMatches] = await Promise.all([
-    searchMoviesAlphabetical(normQuery),
-    searchActorCollections(normQuery),
-    searchMoviesFallback(normQuery)
-  ]);
-
-  const matches = [...alphabeticalMatches];
-
-  for (const match of actorMatches) {
-    if (!matches.some(m => m.path === match.path)) {
-      matches.push(match);
+  // Year search mode
+  if (mode === 'year') {
+    let targetYear = normQuery;
+    if (/^\d{2}$/.test(normQuery)) {
+      const num = parseInt(normQuery, 10);
+      targetYear = num <= 30 ? `20${normQuery}` : `19${normQuery}`;
     }
-  }
 
-  for (const match of fallbackMatches) {
-    if (!matches.some(m => m.path === match.path)) {
-      matches.push(match);
+    if (ALL_YEAR_DIRS.includes(targetYear)) {
+      return fetchYearMoviesPaginated(targetYear, safePage, safeLimit);
     }
+
+    // For years without a dedicated directory (e.g. 1996, 2004), search across HD & actor collections by release year
+    const [hdYearMatches, actorYearMatches] = await Promise.all([
+      (async () => {
+        const m = [];
+        const startUrl = `${BASE_URL}/tamil-hd-movies/`;
+        try {
+          const html = await fetchPage(startUrl);
+          const $ = cheerio.load(html);
+          const totalPages = parseInt($('#totalPages').text().trim()) || 1;
+          parseMovieElements($, m, targetYear, 'year');
+          await Promise.all(
+            Array.from({ length: totalPages - 1 }, (_, i) => i + 2).map(async (p) => {
+              const pHtml = await fetchPage(`${startUrl}?page=${p}`).catch(() => '');
+              if (pHtml) parseMovieElements(cheerio.load(pHtml), m, targetYear, 'year');
+            })
+          );
+        } catch (e) {}
+        return m;
+      })(),
+      searchActorCollections(targetYear)
+    ]);
+
+    const yearMatches = [...hdYearMatches];
+    for (const item of actorYearMatches) {
+      if (extractYearFromTitle(item.title) === targetYear && !yearMatches.some(x => x.path === item.path)) {
+        yearMatches.push(item);
+      }
+    }
+
+    const startIndex = (safePage - 1) * safeLimit;
+    const endIndex = safePage * safeLimit;
+    const enriched = await enrichPosters(yearMatches.slice(startIndex, endIndex));
+    return {
+      movies: enriched,
+      page: safePage,
+      limit: safeLimit,
+      total: yearMatches.length,
+      totalPages: Math.max(1, Math.ceil(yearMatches.length / safeLimit)),
+      hasMore: endIndex < yearMatches.length,
+      baseUrl: BASE_URL
+    };
   }
 
+  // Movie Name search mode (default)
+  console.error(`[Search] Running Movie Name search for '${query}' (page ${safePage}, limit ${safeLimit})...`);
   const firstChar = normQuery.charAt(0);
-  if (matches.length === 0 || !/[a-z]/.test(firstChar)) {
-    console.error(`[Search] Running HD movies directory search as fallback...`);
-    const hdMatches = await searchHdMovies(normQuery);
+  const isAlphaStart = /[a-z]/.test(firstChar);
+
+  let matches = [];
+
+  if (!isAlphaStart) {
+    // Numeric or symbol movie titles (e.g. '96', '29', '24'): scan all pages of all year directories + HD movies
+    const [allYearMatches, hdMatches] = await Promise.all([
+      searchMoviesFallback(normQuery, ALL_YEAR_DIRS, 0, 'name'),
+      searchHdMovies(normQuery)
+    ]);
+    matches = [...allYearMatches];
     for (const match of hdMatches) {
       if (!matches.some(m => m.path === match.path)) {
         matches.push(match);
       }
     }
+  } else {
+    const [alphabeticalMatches, actorMatches, fallbackMatches] = await Promise.all([
+      searchMoviesAlphabetical(normQuery),
+      searchActorCollections(normQuery),
+      searchMoviesFallback(normQuery, ['2026', '2025', '2024'], 0, 'name')
+    ]);
+
+    matches = [...alphabeticalMatches];
+    for (const match of actorMatches) {
+      if (!matches.some(m => m.path === match.path)) {
+        matches.push(match);
+      }
+    }
+    for (const match of fallbackMatches) {
+      if (!matches.some(m => m.path === match.path)) {
+        matches.push(match);
+      }
+    }
+
+    if (matches.length === 0) {
+      console.error(`[Search] Expanding Movie Name search across older years and HD directory...`);
+      const [olderYearMatches, hdMatches] = await Promise.all([
+        searchMoviesFallback(normQuery, ALL_YEAR_DIRS.slice(3), 0, 'name'),
+        searchHdMovies(normQuery)
+      ]);
+      for (const match of [...olderYearMatches, ...hdMatches]) {
+        if (!matches.some(m => m.path === match.path)) {
+          matches.push(match);
+        }
+      }
+    }
   }
+
+  sortMovieNameMatches(matches, normQuery);
 
   const startIndex = (safePage - 1) * safeLimit;
   const endIndex = safePage * safeLimit;
@@ -390,7 +522,8 @@ export async function searchMovies(query, page = 1, limit = 15) {
     limit: safeLimit,
     total: matches.length,
     totalPages,
-    hasMore: endIndex < matches.length
+    hasMore: endIndex < matches.length,
+    baseUrl: BASE_URL
   };
 }
 
