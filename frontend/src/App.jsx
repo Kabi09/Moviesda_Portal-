@@ -62,6 +62,8 @@ export default function App() {
   const [domainError, setDomainError] = useState('');
   const resultsSectionRef = useRef(null);
   const shouldScrollToResultsRef = useRef(false);
+  const searchCacheRef = useRef(new Map());
+  const downloadsCacheRef = useRef(new Map());
 
   const scrollToMoviesList = () => {
     setTimeout(() => {
@@ -81,6 +83,26 @@ export default function App() {
     autoScroll = false,
     cat = category
   ) => {
+    const cacheKey = `${cat}::${mode}::${(searchQuery || 'latest').toLowerCase().trim()}::${targetPage}`;
+    if (searchCacheRef.current.has(cacheKey)) {
+      const cached = searchCacheRef.current.get(cacheKey);
+      setError('');
+      setSearched(true);
+      setMovies(cached.movies);
+      setHasMore(cached.hasMore);
+      setTotalPages(cached.totalPages);
+      if (cached.actors) setActors(cached.actors);
+      if (cached.selectedActor !== undefined) setSelectedActor(cached.selectedActor);
+      setPage(targetPage);
+      setActiveQuery(searchQuery);
+      setActiveSearchType(mode);
+      setActiveCategory(cat);
+      if (autoScroll && cached.movies.length > 0) {
+        scrollToMoviesList();
+      }
+      return;
+    }
+
     setLoadingSearch(true);
     setError('');
     setSearched(true);
@@ -100,10 +122,18 @@ export default function App() {
         setMovies(data);
         setHasMore(false);
         setTotalPages(1);
+        searchCacheRef.current.set(cacheKey, {
+          movies: data,
+          hasMore: false,
+          totalPages: 1
+        });
       } else {
-        setMovies(data.movies || []);
-        setHasMore(Boolean(data.hasMore));
-        setTotalPages(data.totalPages || 1);
+        const loadedMovies = data.movies || [];
+        const loadedHasMore = Boolean(data.hasMore);
+        const loadedTotalPages = data.totalPages || 1;
+        setMovies(loadedMovies);
+        setHasMore(loadedHasMore);
+        setTotalPages(loadedTotalPages);
         if (data.actors) {
           setActors(data.actors);
         }
@@ -113,6 +143,13 @@ export default function App() {
         if (data.baseUrl) {
           console.log('BASE_URL:', data.baseUrl);
         }
+        searchCacheRef.current.set(cacheKey, {
+          movies: loadedMovies,
+          hasMore: loadedHasMore,
+          totalPages: loadedTotalPages,
+          actors: data.actors,
+          selectedActor: data.selectedActor
+        });
       }
       setPage(targetPage);
       setActiveQuery(searchQuery);
@@ -184,6 +221,8 @@ export default function App() {
       }
       setTamilUrlInput(data.baseUrl);
       setHollywoodUrlInput(data.dubbedBaseUrl);
+      searchCacheRef.current.clear();
+      downloadsCacheRef.current.clear();
       setDomainMessage('Domains updated globally without redeployment!');
     } catch (err) {
       setDomainError(err.message || 'Failed to save domain URLs.');
@@ -295,16 +334,26 @@ export default function App() {
 
   const handleFetchDownloads = async (movie) => {
     setSelectedMovie(movie);
-    setLoadingDownloads(true);
-    setDownloads([]);
     setActiveSeason('ALL');
     setActiveFolderGroup('ALL');
     setModalFileFilter('');
-    setMovieDetails(null);
     setError('');
 
+    const movieCat = movie.category || activeCategory || category;
+    const dlCacheKey = `${movieCat}::${movie.path}`;
+    if (downloadsCacheRef.current.has(dlCacheKey)) {
+      const cachedDl = downloadsCacheRef.current.get(dlCacheKey);
+      setDownloads(cachedDl.downloads);
+      setMovieDetails(cachedDl.movieInfo);
+      setLoadingDownloads(false);
+      return;
+    }
+
+    setLoadingDownloads(true);
+    setDownloads([]);
+    setMovieDetails(null);
+
     try {
-      const movieCat = movie.category || activeCategory || category;
       const res = await fetch(
         `${API_BASE}/downloads?path=${encodeURIComponent(movie.path)}&category=${encodeURIComponent(movieCat)}`
       );
@@ -315,9 +364,17 @@ export default function App() {
       if (data && data.downloads) {
         setDownloads(data.downloads);
         setMovieDetails(data.movieInfo);
+        downloadsCacheRef.current.set(dlCacheKey, {
+          downloads: data.downloads,
+          movieInfo: data.movieInfo
+        });
       } else {
         setDownloads(data || []);
         setMovieDetails(null);
+        downloadsCacheRef.current.set(dlCacheKey, {
+          downloads: data || [],
+          movieInfo: null
+        });
       }
     } catch (err) {
       console.error('Downloads fetch error:', err);
