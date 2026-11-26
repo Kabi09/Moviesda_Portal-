@@ -3,6 +3,7 @@ import {
   Search, 
   Film, 
   Calendar,
+  Users,
   Download, 
   Play,
   ExternalLink, 
@@ -37,6 +38,8 @@ export default function App() {
   const [loadingDownloads, setLoadingDownloads] = useState(false);
   const [error, setError] = useState('');
   const [searched, setSearched] = useState(false);
+  const [actors, setActors] = useState([]);
+  const [selectedActor, setSelectedActor] = useState(null);
 
   const fetchMovies = async (searchQuery, targetPage = 1, mode = searchType) => {
     setLoadingSearch(true);
@@ -60,6 +63,12 @@ export default function App() {
         setMovies(data.movies || []);
         setHasMore(Boolean(data.hasMore));
         setTotalPages(data.totalPages || 1);
+        if (data.actors) {
+          setActors(data.actors);
+        }
+        if (data.selectedActor !== undefined) {
+          setSelectedActor(data.selectedActor);
+        }
         if (data.baseUrl) {
           console.log('BASE_URL:', data.baseUrl);
         }
@@ -85,7 +94,7 @@ export default function App() {
     if (e && cleanQuery && typeof window !== 'undefined' && window.umami) {
       window.umami.track(`Movie: ${cleanQuery}`, { name: cleanQuery, type: searchType });
     }
-    const targetQuery = cleanQuery || 'latest';
+    const targetQuery = cleanQuery || (searchType === 'actor' ? (selectedActor?.name || 'Vijay') : 'latest');
     await fetchMovies(targetQuery, 1, searchType);
   };
 
@@ -93,8 +102,30 @@ export default function App() {
     if (newType === searchType) return;
     setSearchType(newType);
     const cleanQuery = query.trim();
-    if (cleanQuery) {
+    if (newType === 'actor') {
+      await fetchMovies(cleanQuery || selectedActor?.name || 'Vijay', 1, 'actor');
+    } else if (cleanQuery) {
       await fetchMovies(cleanQuery, 1, newType);
+    } else if (activeSearchType === 'actor') {
+      await fetchMovies('latest', 1, newType);
+    }
+  };
+
+  const handleSelectActor = async (actor) => {
+    setQuery(actor.name);
+    setSelectedActor(actor);
+    if (typeof window !== 'undefined' && window.umami) {
+      window.umami.track(`Actor: ${actor.name}`, { actor: actor.name, type: 'actor' });
+    }
+    await fetchMovies(actor.path, 1, 'actor');
+  };
+
+  const handleClearSearch = async () => {
+    setQuery('');
+    setSelectedActor(null);
+    setSearchType('name');
+    if (activeQuery !== 'latest' || activeSearchType !== 'name') {
+      await fetchMovies('latest', 1, 'name');
     }
   };
 
@@ -171,7 +202,7 @@ export default function App() {
         {/* Search Bar Section */}
         <section className="search-section">
           <div className="search-container-vertical">
-            {/* Small Tab Toggle: Movie Name (Default) vs Year Search */}
+            {/* Small Tab Toggle: Movie Name (Default) | Year Search | Actor Wise */}
             <div className="search-mode-tabs" role="tablist" aria-label="Search Mode">
               <button
                 type="button"
@@ -195,6 +226,17 @@ export default function App() {
                 <Calendar size={15} />
                 Year Search
               </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={searchType === 'actor'}
+                className={`search-mode-tab ${searchType === 'actor' ? 'active' : ''}`}
+                onClick={() => handleTabChange('actor')}
+                disabled={loadingSearch || loadingDownloads}
+              >
+                <Users size={15} />
+                Actor Wise
+              </button>
             </div>
 
             <form className="search-bar-wrapper" onSubmit={handleSearch}>
@@ -205,18 +247,78 @@ export default function App() {
                 placeholder={
                   searchType === 'year'
                     ? 'Search by release year (e.g. 2026, 2025, 2018)...'
+                    : searchType === 'actor'
+                    ? 'Search or filter actor name (e.g. Vijay, Ajith, Suriya, Dhanush)...'
                     : 'Search movie name (e.g. Dude, 96, 24, 29)...'
                 }
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 disabled={loadingSearch || loadingDownloads}
               />
+              {(query.length > 0 || activeQuery !== 'latest') && (
+                <button
+                  type="button"
+                  className="search-clear-btn"
+                  onClick={handleClearSearch}
+                  disabled={loadingSearch || loadingDownloads}
+                  title="Clear search & show latest movies"
+                  aria-label="Clear search"
+                >
+                  <X size={16} />
+                </button>
+              )}
               <button type="submit" className="search-button" disabled={loadingSearch}>
-                {loadingSearch ? 'Searching...' : searchType === 'year' ? 'Search Year' : 'Search Movie'}
+                {loadingSearch
+                  ? 'Searching...'
+                  : searchType === 'year'
+                  ? 'Search Year'
+                  : searchType === 'actor'
+                  ? 'Search Actor'
+                  : 'Search Movie'}
               </button>
             </form>
+
+            {searchType === 'actor' && actors.length > 0 && (
+              <div className="actor-chips-wrapper">
+                {actors
+                  .filter((actor) => {
+                    const q = query.trim().toLowerCase();
+                    if (!q || (selectedActor && selectedActor.name.toLowerCase() === q)) return true;
+                    return (
+                      actor.name.toLowerCase().includes(q) ||
+                      actor.fullName.toLowerCase().includes(q)
+                    );
+                  })
+                  .map((actor) => {
+                    const isSelected =
+                      selectedActor?.path === actor.path ||
+                      selectedActor?.name === actor.name;
+                    return (
+                      <button
+                        key={actor.path}
+                        type="button"
+                        className={`actor-chip ${isSelected ? 'active' : ''}`}
+                        onClick={() => handleSelectActor(actor)}
+                        disabled={loadingSearch}
+                      >
+                        {actor.name}
+                      </button>
+                    );
+                  })}
+              </div>
+            )}
+
             <p className="disclaimer-text front-disclaimer">
-              * Please enter the <span className="highlight-disclaimer">correct {searchType === 'year' ? 'release year' : 'movie spelling'}</span> to get the correct result.
+              * Please enter the{' '}
+              <span className="highlight-disclaimer">
+                correct{' '}
+                {searchType === 'year'
+                  ? 'release year'
+                  : searchType === 'actor'
+                  ? 'actor name or select an actor above'
+                  : 'movie spelling'}
+              </span>{' '}
+              to get the correct result.
             </p>
           </div>
         </section>
@@ -252,7 +354,9 @@ export default function App() {
           <section>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', flexWrap: 'wrap', gap: '0.5rem' }}>
               <h2 style={{ fontSize: '1.4rem', opacity: 0.9 }}>
-                {activeQuery === 'latest'
+                {activeSearchType === 'actor' && selectedActor
+                  ? `${selectedActor.name} Movies`
+                  : activeQuery === 'latest'
                   ? 'Latest Movies'
                   : activeSearchType === 'year'
                   ? `Year Results for "${activeQuery}"`

@@ -182,6 +182,34 @@ main {
   color: var(--text-muted);
 }
 
+.search-clear-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  margin-right: 0.5rem;
+  border-radius: 50%;
+  border: 1px solid var(--border-glass);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-secondary);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: var(--transition-smooth);
+}
+
+.search-clear-btn:hover:not(:disabled) {
+  background: rgba(255, 107, 139, 0.18);
+  color: var(--accent-coral);
+  border-color: rgba(255, 107, 139, 0.35);
+  transform: scale(1.06);
+}
+
+.search-clear-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 .search-button {
   background: linear-gradient(135deg, var(--accent-coral), var(--accent-magenta));
   color: white;
@@ -1119,6 +1147,54 @@ main {
 }
 
 .search-mode-tab:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Actor Wise Chips Selector */
+.actor-chips-wrapper {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.5rem;
+  max-width: 850px;
+  max-height: 170px;
+  overflow-y: auto;
+  padding: 0.75rem 0.9rem;
+  background: rgba(18, 24, 38, 0.45);
+  border: 1px solid var(--border-glass);
+  border-radius: 16px;
+}
+
+.actor-chip {
+  padding: 0.4rem 0.95rem;
+  border-radius: 100px;
+  border: 1px solid var(--border-glass);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: 0.84rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: var(--transition-smooth);
+}
+
+.actor-chip:hover:not(:disabled):not(.active) {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-primary);
+  border-color: rgba(255, 255, 255, 0.2);
+  transform: translateY(-1px);
+}
+
+.actor-chip.active {
+  background: linear-gradient(135deg, var(--accent-coral), var(--accent-violet));
+  color: #ffffff;
+  border-color: transparent;
+  font-weight: 600;
+  box-shadow: 0 3px 10px rgba(255, 107, 139, 0.28);
+}
+
+.actor-chip:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }

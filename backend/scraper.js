@@ -109,16 +109,17 @@ async function enrichPosters(movieList) {
   );
 }
 
-// Fast paginated fetch for a specific year directory (e.g. 2026) or latest movies
-async function fetchYearMoviesPaginated(year, page = 1, limit = 15) {
+// Fast paginated fetch for a specific directory path (e.g. '/tamil-2026-movies/' or '/actor-vijay-movies-collection/')
+async function fetchDirectoryMoviesPaginated(dirPath, page = 1, limit = 15, extraFields = {}) {
   const ITEMS_PER_SITE_PAGE = 20;
   const startIndex = (page - 1) * limit;
   const endIndex = page * limit;
   const sitePageStart = Math.floor(startIndex / ITEMS_PER_SITE_PAGE) + 1;
   const sitePageEnd = Math.floor((endIndex - 1) / ITEMS_PER_SITE_PAGE) + 1;
 
-  const baseDirUrl = `${BASE_URL}/tamil-${year}-movies/`;
-  console.error(`[Year/Latest] Fetching ${baseDirUrl} (UI page ${page}, site pages ${sitePageStart}..${sitePageEnd})`);
+  const normalizedPath = dirPath.startsWith('/') ? dirPath : `/${dirPath}`;
+  const baseDirUrl = `${BASE_URL}${normalizedPath}`;
+  console.error(`[Directory Paginated] Fetching ${baseDirUrl} (UI page ${page}, site pages ${sitePageStart}..${sitePageEnd})`);
 
   try {
     const firstSiteUrl = sitePageStart === 1 ? baseDirUrl : `${baseDirUrl}?page=${sitePageStart}`;
@@ -132,7 +133,9 @@ async function fetchYearMoviesPaginated(year, page = 1, limit = 15) {
         page,
         limit,
         totalPages: Math.ceil((totalSitePages * ITEMS_PER_SITE_PAGE) / limit),
-        hasMore: false
+        hasMore: false,
+        baseUrl: BASE_URL,
+        ...extraFields
       };
     }
 
@@ -146,7 +149,7 @@ async function fetchYearMoviesPaginated(year, page = 1, limit = 15) {
           const $sp = cheerio.load(spHtml);
           parseMovieElements($sp, collected, '');
         } catch (err) {
-          console.error(`[Year/Latest] Failed fetching site page ${sp}:`, err.message);
+          console.error(`[Directory Paginated] Failed fetching site page ${sp}:`, err.message);
         }
       }
     }
@@ -166,12 +169,18 @@ async function fetchYearMoviesPaginated(year, page = 1, limit = 15) {
       totalPages: totalUiPages,
       total: estimatedTotal,
       hasMore,
-      baseUrl: BASE_URL
+      baseUrl: BASE_URL,
+      ...extraFields
     };
   } catch (error) {
-    console.error(`[Year/Latest] Failed fetching year ${year}:`, error);
-    return { movies: [], page, limit, totalPages: 1, hasMore: false, baseUrl: BASE_URL };
+    console.error(`[Directory Paginated] Failed fetching ${dirPath}:`, error);
+    return { movies: [], page, limit, totalPages: 1, hasMore: false, baseUrl: BASE_URL, ...extraFields };
   }
+}
+
+// Fast paginated fetch for a specific year directory (e.g. 2026) or latest movies
+async function fetchYearMoviesPaginated(year, page = 1, limit = 15) {
+  return fetchDirectoryMoviesPaginated(`/tamil-${year}-movies/`, page, limit);
 }
 
 // Search movies starting with the letter matching the query
@@ -373,6 +382,115 @@ async function searchActorCollections(query) {
 
 const ALL_YEAR_DIRS = ['2026', '2025', '2024', '2023', '2022', '2021', '2020', '2019', '2018', '2017', '2016', '2015', '2012'];
 
+let cachedActorsList = null;
+
+const ACTOR_NAME_FIXES = {
+  'dhaunsh': 'Dhanush',
+  'surya': 'Suriya',
+  'kamal hassan': 'Kamal Haasan'
+};
+
+const ACTOR_ALIASES = {
+  'dhanush': ['dhaunsh', 'dhanush'],
+  'suriya': ['surya', 'suriya'],
+  'kamal haasan': ['kamal hassan', 'kamal haasan', 'kamal'],
+  'vijay sethupathi': ['vijay sethupathi', 'vjs', 'sethupathi'],
+  'sivakarthikeyan': ['sivakarthikeyan', 'sk'],
+  'simbu': ['simbu', 'str', 'silambarasan'],
+  'jayam ravi': ['jayam ravi', 'ravi', 'ravi mohan'],
+  'rajinikanth': ['rajinikanth', 'rajini', 'superstar'],
+  'ajith': ['ajith', 'ajith kumar', 'thala'],
+  'vijay': ['vijay', 'thalapathy']
+};
+
+export async function getActorsList() {
+  if (cachedActorsList && cachedActorsList.length > 0) {
+    return cachedActorsList;
+  }
+
+  const mainUrls = [
+    `${BASE_URL}/tamil-movies-collection/`,
+    `${BASE_URL}/tamil-movies-collection/?page=2`
+  ];
+  const mainHtmls = await Promise.all(mainUrls.map(url => fetchPage(url).catch(() => '')));
+
+  const actors = [];
+  for (const html of mainHtmls) {
+    if (!html) continue;
+    const $ = cheerio.load(html);
+    $('.f a').each((i, el) => {
+      const fullName = $(el).text().trim();
+      const href = $(el).attr('href');
+      if (fullName && href && href.startsWith('/actor-')) {
+        let shortName = fullName.replace(/\s*movies?\s*collections?\s*/i, '').trim();
+        const lowerShort = shortName.toLowerCase();
+        if (ACTOR_NAME_FIXES[lowerShort]) {
+          shortName = ACTOR_NAME_FIXES[lowerShort];
+        }
+        if (!actors.some(a => a.path === href)) {
+          actors.push({
+            name: shortName,
+            fullName,
+            path: href
+          });
+        }
+      }
+    });
+  }
+
+  // Sort popular/alphabetical cleanly
+  const priorityOrder = [
+    'Vijay', 'Ajith', 'Rajinikanth', 'Kamal Haasan', 'Suriya',
+    'Dhanush', 'Vijay Sethupathi', 'Sivakarthikeyan', 'Vikram',
+    'Karthi', 'Simbu', 'Jayam Ravi', 'Vishal', 'Madhavan', 'Arya'
+  ];
+  actors.sort((a, b) => {
+    const idxA = priorityOrder.indexOf(a.name);
+    const idxB = priorityOrder.indexOf(b.name);
+    if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+    if (idxA !== -1) return -1;
+    if (idxB !== -1) return 1;
+    return a.name.localeCompare(b.name);
+  });
+
+  if (actors.length > 0) {
+    cachedActorsList = actors;
+  }
+  return actors;
+}
+
+function findMatchingActor(actors, query) {
+  const q = (query || '').toLowerCase().trim();
+  if (!q || q === 'latest' || q === 'all') {
+    return actors[0] || null;
+  }
+
+  // Check exact path match first
+  const byPath = actors.find(a => a.path.toLowerCase() === q || a.path.toLowerCase() === `/${q.replace(/^\/+|\/+$/g, '')}/`);
+  if (byPath) return byPath;
+
+  // Check exact short name or alias match
+  for (const actor of actors) {
+    const lowerName = actor.name.toLowerCase();
+    const lowerFull = actor.fullName.toLowerCase();
+    const aliases = ACTOR_ALIASES[lowerName] || [];
+    if (lowerName === q || lowerFull === q || aliases.includes(q)) {
+      return actor;
+    }
+  }
+
+  // Starts-with or substring match
+  return (
+    actors.find(a => a.name.toLowerCase().startsWith(q)) ||
+    actors.find(a => {
+      const lowerName = a.name.toLowerCase();
+      const aliases = ACTOR_ALIASES[lowerName] || [];
+      return lowerName.includes(q) || a.fullName.toLowerCase().includes(q) || aliases.some(al => al.includes(q));
+    }) ||
+    null
+  );
+}
+
 function sortMovieNameMatches(matches, normQuery) {
   return matches.sort((a, b) => {
     const nameA = stripYearFromTitle(a.title).toLowerCase().replace(/\s*\(movie\)\s*/g, '').trim();
@@ -395,6 +513,30 @@ export async function searchMovies(query, page = 1, limit = 15, searchType = 'na
   const safePage = Math.max(1, parseInt(page) || 1);
   const safeLimit = Math.max(1, parseInt(limit) || 15);
   const mode = (searchType || 'name').toLowerCase().trim();
+
+  // Actor Wise search/list mode
+  if (mode === 'actor') {
+    const actors = await getActorsList();
+    const matchedActor = findMatchingActor(actors, normQuery);
+    if (!matchedActor) {
+      return {
+        movies: [],
+        page: safePage,
+        limit: safeLimit,
+        total: 0,
+        totalPages: 1,
+        hasMore: false,
+        baseUrl: BASE_URL,
+        actors,
+        selectedActor: null
+      };
+    }
+
+    return fetchDirectoryMoviesPaginated(matchedActor.path, safePage, safeLimit, {
+      actors,
+      selectedActor: matchedActor
+    });
+  }
 
   // Initial load ('latest' or empty) shows latest 2026 movies
   if (!normQuery || normQuery === 'latest') {
