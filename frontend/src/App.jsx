@@ -284,7 +284,7 @@ export default function App() {
                 disabled={loadingSearch || loadingDownloads}
               >
                 <Globe size={17} />
-                Dubbed Movies
+                Hollywood Movies
               </button>
             </div>
 
@@ -336,10 +336,10 @@ export default function App() {
                   searchType === 'year'
                     ? 'Search by release year (e.g. 2026, 2025, 2018)...'
                     : searchType === 'actor'
-                    ? 'Search or filter actor name (e.g. Vijay, Ajith, Suriya, Dhanush)...'
-                    : category === 'dubbed'
-                    ? 'Search dubbed movies, web series, collections (e.g. Spiderman, Matrix, Money Heist)...'
-                    : 'Search movie name (e.g. Dude, 96, 24, 29)...'
+                      ? 'Search or filter actor name (e.g. Vijay, Ajith, Suriya, Dhanush)...'
+                      : category === 'dubbed'
+                        ? 'Search Hollywood movies, web series, collections (e.g. Spiderman, Matrix, Money Heist)...'
+                        : 'Search movie name (e.g. Dude, 96, 24, 29)...'
                 }
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
@@ -361,10 +361,10 @@ export default function App() {
                 {loadingSearch
                   ? 'Searching...'
                   : searchType === 'year'
-                  ? 'Search Year'
-                  : searchType === 'actor'
-                  ? 'Search Actor'
-                  : 'Search Movie'}
+                    ? 'Search Year'
+                    : searchType === 'actor'
+                      ? 'Search Actor'
+                      : 'Search Movie'}
               </button>
             </form>
 
@@ -449,17 +449,13 @@ export default function App() {
               <h2 style={{ fontSize: '1.4rem', opacity: 0.9 }}>
                 {activeSearchType === 'actor' && selectedActor
                   ? `${selectedActor.name} Movies`
-                  : activeSearchType === 'webseries'
-                    ? activeQuery === 'latest'
-                      ? 'Tamil Dubbed Web Series'
-                      : `Dubbed Web Series for "${activeQuery}"`
-                    : activeQuery === 'latest'
-                      ? activeCategory === 'dubbed'
-                        ? 'Latest Dubbed Movies'
-                        : 'Latest Movies'
-                      : activeSearchType === 'year'
-                        ? `${activeCategory === 'dubbed' ? 'Dubbed ' : ''}Year Results for "${activeQuery}"`
-                        : `${activeCategory === 'dubbed' ? 'Dubbed ' : ''}Movie Results for "${activeQuery}"`}{' '}
+                  : activeQuery === 'latest'
+                    ? activeCategory === 'dubbed'
+                      ? 'Latest Hollywood Movies'
+                      : 'Latest Movies'
+                    : activeSearchType === 'year'
+                      ? `${activeCategory === 'dubbed' ? 'Hollywood ' : ''}Year Results for "${activeQuery}"`
+                      : `${activeCategory === 'dubbed' ? 'Hollywood ' : ''}Movie Results for "${activeQuery}"`}{' '}
                 ({movies.length})
               </h2>
             </div>
@@ -654,19 +650,18 @@ export default function App() {
                     <div className="download-group">
                       {(() => {
                         const folderGroups = Array.from(
-                          new Set(downloads.map((d) => d.folderGroup || 'Main Files'))
+                          new Set(downloads.map((d) => d.folderGroup).filter(Boolean))
                         );
-                        const hasMultipleFolders = folderGroups.length > 1;
+                        const hasMultipleGroups = folderGroups.length > 1;
                         const filteredDownloads = downloads.filter((file) => {
-                          const group = file.folderGroup || 'Main Files';
-                          if (hasMultipleFolders && activeFolderGroup !== 'ALL' && group !== activeFolderGroup) {
+                          if (hasMultipleGroups && activeFolderGroup !== 'ALL' && file.folderGroup !== activeFolderGroup) {
                             return false;
                           }
                           if (modalFileFilter.trim()) {
                             const q = modalFileFilter.trim().toLowerCase();
                             return (
                               (file.fileName || '').toLowerCase().includes(q) ||
-                              group.toLowerCase().includes(q) ||
+                              (file.folderGroup || '').toLowerCase().includes(q) ||
                               (file.resolution || '').toLowerCase().includes(q)
                             );
                           }
@@ -677,15 +672,15 @@ export default function App() {
                           <>
                             <div className="downloads-header-row">
                               <h3 style={{ fontSize: '1.15rem', color: '#f3f4f6' }}>
-                                Available Formats & Direct Links ({filteredDownloads.length})
+                                Available Formats & Resolving Links
                               </h3>
-                              {downloads.length > 4 && (
+                              {downloads.length > 6 && (
                                 <div className="modal-file-filter-box">
                                   <Search size={14} className="modal-filter-icon" />
                                   <input
                                     type="text"
                                     className="modal-file-filter-input"
-                                    placeholder="Filter episode, movie, or 720p/1080p..."
+                                    placeholder="Quick filter episode or quality..."
                                     value={modalFileFilter}
                                     onChange={(e) => setModalFileFilter(e.target.value)}
                                   />
@@ -702,20 +697,17 @@ export default function App() {
                               )}
                             </div>
 
-                            {hasMultipleFolders && (
+                            {hasMultipleGroups && (
                               <div className="folder-groups-bar">
                                 <button
                                   type="button"
                                   className={`folder-group-chip ${activeFolderGroup === 'ALL' ? 'active' : ''}`}
                                   onClick={() => setActiveFolderGroup('ALL')}
                                 >
-                                  <FolderOpen size={13} />
-                                  All Folders ({downloads.length})
+                                  All ({downloads.length})
                                 </button>
                                 {folderGroups.map((grp) => {
-                                  const count = downloads.filter(
-                                    (d) => (d.folderGroup || 'Main Files') === grp
-                                  ).length;
+                                  const count = downloads.filter((d) => d.folderGroup === grp).length;
                                   return (
                                     <button
                                       key={grp}
@@ -723,7 +715,6 @@ export default function App() {
                                       className={`folder-group-chip ${activeFolderGroup === grp ? 'active' : ''}`}
                                       onClick={() => setActiveFolderGroup(grp)}
                                     >
-                                      <FolderOpen size={13} />
                                       {grp} ({count})
                                     </button>
                                   );
@@ -733,9 +724,8 @@ export default function App() {
 
                             {filteredDownloads.map((file, fIdx) => (
                               <div key={fIdx} className="file-item-card">
-                                {hasMultipleFolders && file.folderGroup && (
+                                {hasMultipleGroups && file.folderGroup && (
                                   <div className="file-folder-badge">
-                                    <FolderOpen size={12} />
                                     {file.folderGroup}
                                   </div>
                                 )}

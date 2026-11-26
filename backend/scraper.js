@@ -1065,18 +1065,27 @@ async function resolveDubbedFileServers(fileId, fallbackPageUrl = '') {
   return { servers: resolvedServers, details };
 }
 
-function formatFolderBreadcrumb(breadcrumbs) {
-  if (!breadcrumbs || breadcrumbs.length === 0) return 'Main Files';
-  // Clean redundant prefixes to keep folder tabs readable (e.g. "Season 01 • 720p HD" or "The Matrix (1999) • 720p HD")
-  return breadcrumbs
-    .map((b) =>
-      b
-        .replace(/\s*Tamil\s*Dubbed\s*(?:Movie|Web\s*Series|Collections?)?\s*/gi, ' ')
-        .replace(/\s+/g, ' ')
-        .trim()
-    )
-    .filter(Boolean)
-    .join(' › ');
+function formatFolderBreadcrumb(breadcrumbs, fileName = '') {
+  // Check if fileName has an Episode number (e.g. "Epi 01", "Episode 1", "EP 02")
+  const epiMatch = (fileName || '').match(/\b(?:epi(?:sode)?|ep)\s*[-:.]?\s*(\d{1,3})\b/i);
+  if (epiMatch) {
+    const epNum = epiMatch[1].padStart(2, '0');
+    return `Episode ${epNum}`;
+  }
+
+  if (!breadcrumbs || breadcrumbs.length === 0) return '';
+
+  // Only keep top-level folder if it is a distinct Movie in a Collection (not "(Original)", "(Tamil)", or resolution like "(720p HD)")
+  const firstFolder = breadcrumbs[0] || '';
+  const isQualityOrLangFolder = /\((?:original|tamil|dubbed|hd|360p|480p|720p|1080p|mp4|\d+x\d+)\)/i.test(firstFolder);
+  if (isQualityOrLangFolder) {
+    return '';
+  }
+
+  return firstFolder
+    .replace(/\s*Tamil\s*Dubbed\s*(?:Movie|Web\s*Series|Collections?)?\s*/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 // Recursively find all download links starting from a movie/collection/webseries page path/URL
@@ -1174,7 +1183,7 @@ export async function extractDownloadLinks(moviePath, category = '') {
           fileSize,
           format,
           pageUrl: href.startsWith('http') ? href : `${activeBaseUrl}${href}`,
-          folderGroup: formatFolderBreadcrumb(breadcrumbs)
+          folderGroup: formatFolderBreadcrumb(breadcrumbs, rawTitle)
         });
       });
 
@@ -1323,13 +1332,14 @@ export async function extractDownloadLinks(moviePath, category = '') {
           }
         }
 
+        const finalFileName = fileName || $('title').text().trim();
         filesList.push({
-          fileName: fileName || $('title').text().trim(),
+          fileName: finalFileName,
           fileSize,
           duration,
           resolution,
           format,
-          folderGroup: formatFolderBreadcrumb(breadcrumbs),
+          folderGroup: formatFolderBreadcrumb(breadcrumbs, finalFileName),
           servers,
           pageUrl: url
         });
