@@ -535,12 +535,103 @@ async function fetchDubbedDirectoryPages(dirPath, normQuery = '', searchType = '
   return collected;
 }
 
-export async function searchDubbedMovies(query, searchType = 'name') {
+// Fast 25-per-page pagination for Latest Movies (supports both Tamil and Hollywood/Dubbed)
+async function fetchLatestMoviesPaginated(isDubbed = false, page = 1, limit = 25) {
+  const ITEMS_PER_SITE_PAGE = 20;
+  const safePage = Math.max(1, parseInt(page) || 1);
+  const safeLimit = Math.max(1, parseInt(limit) || 25);
+  const startIndex = (safePage - 1) * safeLimit;
+  const endIndex = safePage * safeLimit;
+  const sitePageStart = Math.floor(startIndex / ITEMS_PER_SITE_PAGE) + 1;
+  const sitePageEnd = Math.floor((endIndex - 1) / ITEMS_PER_SITE_PAGE) + 1;
+
+  const siteBase = isDubbed ? DUBBED_BASE_URL : BASE_URL;
+  const dirPath = isDubbed ? '/tamil-2026-dubbed-movies/' : '/tamil-2026-movies/';
+  const pageParam = isDubbed ? 'get-page' : 'page';
+  const baseDirUrl = `${siteBase}${dirPath}`;
+
+  try {
+    const firstSiteUrl = sitePageStart === 1 ? baseDirUrl : `${baseDirUrl}?${pageParam}=${sitePageStart}`;
+    const firstHtml = await fetchPage(firstSiteUrl);
+    const $first = cheerio.load(firstHtml);
+
+    let totalSitePages = parseInt($first('#totalPages').text().trim()) || 1;
+    if (totalSitePages <= 1) {
+      $first('.pagination a, .pgn a').each((i, el) => {
+        const num = parseInt($first(el).text().trim());
+        if (!isNaN(num) && num > totalSitePages) totalSitePages = num;
+      });
+    }
+
+    const totalUiPages = Math.max(1, Math.ceil((totalSitePages * ITEMS_PER_SITE_PAGE) / safeLimit));
+    if (sitePageStart > totalSitePages) {
+      return {
+        movies: [],
+        page: safePage,
+        limit: safeLimit,
+        totalPages: totalUiPages,
+        total: totalSitePages * ITEMS_PER_SITE_PAGE,
+        hasMore: false,
+        baseUrl: siteBase,
+        category: isDubbed ? 'dubbed' : 'tamil'
+      };
+    }
+
+    const collected = [];
+    parseMovieElements($first, collected, '', 'name', siteBase, isDubbed);
+
+    if (sitePageEnd > sitePageStart) {
+      const clampedEnd = Math.min(sitePageEnd, totalSitePages);
+      for (let sp = sitePageStart + 1; sp <= clampedEnd; sp++) {
+        const spHtml = await fetchPage(`${baseDirUrl}?${pageParam}=${sp}`).catch(() => '');
+        if (spHtml) {
+          parseMovieElements(cheerio.load(spHtml), collected, '', 'name', siteBase, isDubbed);
+        }
+      }
+    }
+
+    const localOffset = startIndex - (sitePageStart - 1) * ITEMS_PER_SITE_PAGE;
+    const pageSlice = collected.slice(localOffset, localOffset + safeLimit);
+
+    if (isDubbed) {
+      await enrichDubbedPosters(pageSlice);
+    } else {
+      await enrichPosters(pageSlice, safeLimit);
+    }
+
+    const hasMore = sitePageEnd < totalSitePages || localOffset + safeLimit < collected.length;
+
+    return {
+      movies: pageSlice,
+      page: safePage,
+      limit: safeLimit,
+      totalPages: totalUiPages,
+      total: totalSitePages * ITEMS_PER_SITE_PAGE,
+      hasMore,
+      baseUrl: siteBase,
+      category: isDubbed ? 'dubbed' : 'tamil'
+    };
+  } catch (err) {
+    console.error(`[Latest Paginated] Error fetching latest movies:`, err.message);
+    return {
+      movies: [],
+      page: safePage,
+      limit: safeLimit,
+      totalPages: 1,
+      total: 0,
+      hasMore: false,
+      baseUrl: siteBase,
+      category: isDubbed ? 'dubbed' : 'tamil'
+    };
+  }
+}
+
+export async function searchDubbedMovies(query, searchType = 'name', page = 1, limit = 25) {
   const normQuery = (query || '').toLowerCase().trim();
   const mode = (searchType || 'name').toLowerCase().trim();
   const filterQuery = !normQuery || normQuery === 'latest' || normQuery === 'all' ? '' : normQuery;
 
-  console.error(`[Dubbed Search] Mode='${mode}', Query='${query}' on ${DUBBED_BASE_URL}`);
+  console.error(`[Dubbed Search] Mode='${mode}', Query='${query}' (page ${page}) on ${DUBBED_BASE_URL}`);
 
   if (mode === 'webseries') {
     const series = await fetchDubbedDirectoryPages('/tamil-dubbed-web-series/', filterQuery, 'name');
@@ -611,20 +702,9 @@ export async function searchDubbedMovies(query, searchType = 'name') {
     };
   }
 
-  // Default Dubbed 'name' search: unified search across A-Z, All Years, Collections (plus child movies inside matched collections), and Web Series
+  // Default Dubbed 'name' search: when 'latest'/empty, return 25 latest Hollywood movies per page
   if (!filterQuery) {
-    const latestDubbed = await fetchDubbedDirectoryPages('/tamil-2026-dubbed-movies/', '', 'name');
-    await enrichDubbedPosters(latestDubbed);
-    return {
-      movies: latestDubbed,
-      page: 1,
-      limit: latestDubbed.length,
-      total: latestDubbed.length,
-      totalPages: 1,
-      hasMore: false,
-      baseUrl: DUBBED_BASE_URL,
-      category: 'dubbed'
-    };
+    return fetchLatestMoviesPaginated(true, page, limit);
   }
 
   const firstChar = filterQuery.charAt(0);
@@ -835,13 +915,13 @@ function deduplicateMoviesByTitle(matches) {
   return result;
 }
 
-export async function searchMovies(query, page = 1, limit = 15, searchType = 'name', category = 'tamil') {
+export async function searchMovies(query, page = 1, limit = 25, searchType = 'name', category = 'tamil') {
+  const safePage = Math.max(1, parseInt(page) || 1);
+  const safeLimit = Math.max(1, parseInt(limit) || 25);
   if ((category || 'tamil').toLowerCase().trim() === 'dubbed') {
-    return searchDubbedMovies(query, searchType);
+    return searchDubbedMovies(query, searchType, safePage, safeLimit);
   }
   const normQuery = (query || '').toLowerCase().trim();
-  const safePage = Math.max(1, parseInt(page) || 1);
-  const safeLimit = Math.max(1, parseInt(limit) || 15);
   const mode = (searchType || 'name').toLowerCase().trim();
 
   // Actor Wise search/list mode
@@ -868,9 +948,9 @@ export async function searchMovies(query, page = 1, limit = 15, searchType = 'na
     });
   }
 
-  // Initial load ('latest' or empty) shows all latest 2026 movies
+  // Initial load ('latest' or empty) shows 25 latest 2026 Tamil movies per page
   if (!normQuery || normQuery === 'latest') {
-    return fetchYearMoviesPaginated('2026', safePage, safeLimit);
+    return fetchLatestMoviesPaginated(false, safePage, safeLimit);
   }
 
   // Year search mode

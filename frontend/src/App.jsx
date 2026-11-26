@@ -14,7 +14,9 @@ import {
   Clock,
   Maximize2,
   FolderOpen,
-  Heart
+  Heart,
+  ChevronRight,
+  ChevronLeft
 } from 'lucide-react';
 import imageNotFound from './assets/image-not-found.jpg';
 import resultNotFound from './assets/result-not-found.jpg';
@@ -22,14 +24,18 @@ import resultNotFound from './assets/result-not-found.jpg';
 
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:3000/api';
 const CURRENT_YEAR = new Date().getFullYear().toString();
+const LATEST_PER_PAGE = 25;
 
 export default function App() {
   const [category, setCategory] = useState('tamil'); // 'tamil' (default) | 'dubbed'
   const [activeCategory, setActiveCategory] = useState('tamil');
   const [query, setQuery] = useState('');
-  const [searchType, setSearchType] = useState('name'); // 'name' | 'year' | 'actor' | 'collection' | 'webseries'
+  const [searchType, setSearchType] = useState('name'); // 'name' | 'year' | 'actor'
   const [activeQuery, setActiveQuery] = useState('latest');
   const [activeSearchType, setActiveSearchType] = useState('name');
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [hasMore, setHasMore] = useState(false);
   const [movies, setMovies] = useState([]);
   const [brokenPosters, setBrokenPosters] = useState({});
   const [selectedMovie, setSelectedMovie] = useState(null);
@@ -59,7 +65,7 @@ export default function App() {
 
   const fetchMovies = async (
     searchQuery,
-    _targetPage = 1,
+    targetPage = 1,
     mode = searchType,
     autoScroll = false,
     cat = category
@@ -73,7 +79,7 @@ export default function App() {
 
     try {
       const res = await fetch(
-        `${API_BASE}/search?q=${encodeURIComponent(searchQuery)}&type=${encodeURIComponent(mode)}&category=${encodeURIComponent(cat)}`
+        `${API_BASE}/search?q=${encodeURIComponent(searchQuery)}&page=${targetPage}&limit=${LATEST_PER_PAGE}&type=${encodeURIComponent(mode)}&category=${encodeURIComponent(cat)}`
       );
       if (!res.ok) {
         throw new Error(`Server returned status: ${res.status}`);
@@ -81,8 +87,12 @@ export default function App() {
       const data = await res.json();
       if (Array.isArray(data)) {
         setMovies(data);
+        setHasMore(false);
+        setTotalPages(1);
       } else {
         setMovies(data.movies || []);
+        setHasMore(Boolean(data.hasMore));
+        setTotalPages(data.totalPages || 1);
         if (data.actors) {
           setActors(data.actors);
         }
@@ -93,6 +103,7 @@ export default function App() {
           console.log('BASE_URL:', data.baseUrl);
         }
       }
+      setPage(targetPage);
       setActiveQuery(searchQuery);
       setActiveSearchType(mode);
       setActiveCategory(cat);
@@ -185,15 +196,24 @@ export default function App() {
     } else if (searchType === 'year') {
       setSelectedActor(null);
       await fetchMovies(CURRENT_YEAR, 1, 'year', false, category);
-    } else if (searchType === 'collection' || searchType === 'webseries') {
-      setSelectedActor(null);
-      await fetchMovies('latest', 1, searchType, false, category);
     } else {
       setSelectedActor(null);
-      if (activeQuery !== 'latest' || activeSearchType !== 'name') {
+      if (activeQuery !== 'latest' || activeSearchType !== 'name' || page !== 1) {
         await fetchMovies('latest', 1, 'name', false, category);
       }
     }
+  };
+
+  const handleNextPage = async () => {
+    if (loadingSearch || !hasMore) return;
+    const nextPage = page + 1;
+    await fetchMovies(activeQuery, nextPage, activeSearchType, true, activeCategory);
+  };
+
+  const handlePrevPage = async () => {
+    if (loadingSearch || page <= 1) return;
+    const prevPage = page - 1;
+    await fetchMovies(activeQuery, prevPage, activeSearchType, true, activeCategory);
   };
 
   const handleFetchDownloads = async (movie) => {
@@ -339,7 +359,7 @@ export default function App() {
                       ? 'Search or filter actor name (e.g. Vijay, Ajith, Suriya, Dhanush)...'
                       : category === 'dubbed'
                         ? 'Search Hollywood movies, web series, collections (e.g. Spiderman, Matrix, Money Heist)...'
-                        : 'Search movie name (e.g. Dude, 96, 24, 29)...'
+                        : 'Search movie name (e.g. Dude, 96, Leo, Karuppu, Soorarai Pottru, )...'
                 }
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
@@ -458,6 +478,11 @@ export default function App() {
                       : `${activeCategory === 'dubbed' ? 'Hollywood ' : ''}Movie Results for "${activeQuery}"`}{' '}
                 ({movies.length})
               </h2>
+              {totalPages > 1 && (
+                <span style={{ fontSize: '0.92rem', color: 'var(--text-secondary)' }}>
+                  Page {page} of {totalPages}
+                </span>
+              )}
             </div>
             <div className="results-grid">
               {movies.map((movie, idx) => (
@@ -515,6 +540,37 @@ export default function App() {
                 </div>
               ))}
             </div>
+
+            {/* Bottom Next / Previous Pagination for Latest 25 Movies */}
+            {(page > 1 || hasMore) && (
+              <div className="pagination-container">
+                {page > 1 && (
+                  <button
+                    type="button"
+                    className="pagination-btn pagination-btn-prev"
+                    onClick={handlePrevPage}
+                    disabled={loadingSearch}
+                  >
+                    <ChevronLeft size={18} />
+                    Previous
+                  </button>
+                )}
+                <span className="pagination-page-indicator">
+                  Page {page}{totalPages > 1 ? ` of ${totalPages}` : ''}
+                </span>
+                {hasMore && (
+                  <button
+                    type="button"
+                    className="pagination-btn pagination-btn-next"
+                    onClick={handleNextPage}
+                    disabled={loadingSearch}
+                  >
+                    Next
+                    <ChevronRight size={18} />
+                  </button>
+                )}
+              </div>
+            )}
           </section>
         )}
       </main>
