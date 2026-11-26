@@ -13,24 +13,20 @@ import {
   Clock, 
   Maximize2, 
   FolderOpen,
-  Heart,
-  ChevronRight,
-  ChevronLeft
+  Heart
 } from 'lucide-react';
 
 
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:3000/api';
-const MOVIES_PER_PAGE = 15;
+const CURRENT_YEAR = new Date().getFullYear().toString();
 
 export default function App() {
   const [query, setQuery] = useState('');
-  const [searchType, setSearchType] = useState('name'); // 'name' (default) | 'year'
+  const [searchType, setSearchType] = useState('name'); // 'name' (default) | 'year' | 'actor'
   const [activeQuery, setActiveQuery] = useState('latest');
   const [activeSearchType, setActiveSearchType] = useState('name');
-  const [page, setPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(1);
-  const [hasMore, setHasMore] = useState(false);
   const [movies, setMovies] = useState([]);
+  const [brokenPosters, setBrokenPosters] = useState({});
   const [selectedMovie, setSelectedMovie] = useState(null);
   const [downloads, setDownloads] = useState([]);
   const [movieDetails, setMovieDetails] = useState(null);
@@ -54,32 +50,26 @@ export default function App() {
     }, 80);
   };
 
-  const fetchMovies = async (searchQuery, targetPage = 1, mode = searchType, autoScroll = false) => {
+  const fetchMovies = async (searchQuery, _targetPage = 1, mode = searchType, autoScroll = false) => {
     setLoadingSearch(true);
     setError('');
     setSearched(true);
     setMovies([]);
+    setBrokenPosters({});
     shouldScrollToResultsRef.current = autoScroll;
 
     try {
       const res = await fetch(
-        `${API_BASE}/search?q=${encodeURIComponent(searchQuery)}&page=${targetPage}&limit=${MOVIES_PER_PAGE}&type=${encodeURIComponent(mode)}`
+        `${API_BASE}/search?q=${encodeURIComponent(searchQuery)}&type=${encodeURIComponent(mode)}`
       );
       if (!res.ok) {
         throw new Error(`Server returned status: ${res.status}`);
       }
       const data = await res.json();
-      let loadedMovies = [];
       if (Array.isArray(data)) {
-        loadedMovies = data.slice(0, MOVIES_PER_PAGE);
-        setMovies(loadedMovies);
-        setHasMore(data.length > MOVIES_PER_PAGE);
-        setTotalPages(1);
+        setMovies(data);
       } else {
-        loadedMovies = data.movies || [];
-        setMovies(loadedMovies);
-        setHasMore(Boolean(data.hasMore));
-        setTotalPages(data.totalPages || 1);
+        setMovies(data.movies || []);
         if (data.actors) {
           setActors(data.actors);
         }
@@ -90,7 +80,6 @@ export default function App() {
           console.log('BASE_URL:', data.baseUrl);
         }
       }
-      setPage(targetPage);
       setActiveQuery(searchQuery);
       setActiveSearchType(mode);
     } catch (err) {
@@ -118,7 +107,13 @@ export default function App() {
     if (e && cleanQuery && typeof window !== 'undefined' && window.umami) {
       window.umami.track(`Movie: ${cleanQuery}`, { name: cleanQuery, type: searchType });
     }
-    const targetQuery = cleanQuery || (searchType === 'actor' ? (selectedActor?.name || 'Vijay') : 'latest');
+    const targetQuery =
+      cleanQuery ||
+      (searchType === 'actor'
+        ? selectedActor?.name || 'Vijay'
+        : searchType === 'year'
+        ? CURRENT_YEAR
+        : 'latest');
     await fetchMovies(targetQuery, 1, searchType, searchType === 'actor' || Boolean(cleanQuery));
   };
 
@@ -128,11 +123,12 @@ export default function App() {
     setQuery('');
     if (newType === 'actor') {
       await fetchMovies('Vijay', 1, 'actor', false);
+    } else if (newType === 'year') {
+      setSelectedActor(null);
+      await fetchMovies(CURRENT_YEAR, 1, 'year', false);
     } else {
       setSelectedActor(null);
-      if (activeQuery !== 'latest' || activeSearchType === 'actor') {
-        await fetchMovies('latest', 1, newType, false);
-      }
+      await fetchMovies('latest', 1, 'name', false);
     }
   };
 
@@ -147,23 +143,18 @@ export default function App() {
 
   const handleClearSearch = async () => {
     setQuery('');
-    setSelectedActor(null);
-    setSearchType('name');
-    if (activeQuery !== 'latest' || activeSearchType !== 'name') {
-      await fetchMovies('latest', 1, 'name', false);
+    // Stay on the current active toggle (searchType)
+    if (searchType === 'actor') {
+      await fetchMovies('Vijay', 1, 'actor', false);
+    } else if (searchType === 'year') {
+      setSelectedActor(null);
+      await fetchMovies(CURRENT_YEAR, 1, 'year', false);
+    } else {
+      setSelectedActor(null);
+      if (activeQuery !== 'latest' || activeSearchType !== 'name') {
+        await fetchMovies('latest', 1, 'name', false);
+      }
     }
-  };
-
-  const handleNextPage = async () => {
-    if (loadingSearch || !hasMore) return;
-    const nextPage = page + 1;
-    await fetchMovies(activeQuery, nextPage, activeSearchType, true);
-  };
-
-  const handlePrevPage = async () => {
-    if (loadingSearch || page <= 1) return;
-    const prevPage = page - 1;
-    await fetchMovies(activeQuery, prevPage, activeSearchType, true);
   };
 
   const handleFetchDownloads = async (movie) => {
@@ -386,22 +377,28 @@ export default function App() {
                   : `Movie Results for "${activeQuery}"`}{' '}
                 ({movies.length})
               </h2>
-              {totalPages > 1 && (
-                <span style={{ fontSize: '0.92rem', color: 'var(--text-secondary)' }}>
-                  Page {page} of {totalPages}
-                </span>
-              )}
             </div>
             <div className="results-grid">
               {movies.map((movie, idx) => (
                 <div 
-                  key={idx} 
+                  key={movie.path || idx} 
                   className="glass-card movie-card-enriched"
                   onClick={() => handleFetchDownloads(movie)}
                 >
                   <div className="card-poster-wrapper">
-                    {movie.poster ? (
-                      <img src={movie.poster} alt={movie.title} className="card-poster-img" loading="lazy" />
+                    {movie.poster && !brokenPosters[movie.path || idx] ? (
+                      <img
+                        src={movie.poster}
+                        alt={movie.title}
+                        className="card-poster-img"
+                        loading="lazy"
+                        onError={() =>
+                          setBrokenPosters((prev) => ({
+                            ...prev,
+                            [movie.path || idx]: true
+                          }))
+                        }
+                      />
                     ) : (
                       <div className="card-poster-placeholder">
                         <Film size={40} style={{ opacity: 0.25 }} />
@@ -434,37 +431,6 @@ export default function App() {
                 </div>
               ))}
             </div>
-
-            {/* Bottom Pagination / Next Button */}
-            {(page > 1 || hasMore) && (
-              <div className="pagination-container">
-                {page > 1 && (
-                  <button
-                    type="button"
-                    className="pagination-btn pagination-btn-prev"
-                    onClick={handlePrevPage}
-                    disabled={loadingSearch}
-                  >
-                    <ChevronLeft size={18} />
-                    Previous
-                  </button>
-                )}
-                <span className="pagination-page-indicator">
-                  Page {page}{totalPages > 1 ? ` of ${totalPages}` : ''}
-                </span>
-                {hasMore && (
-                  <button
-                    type="button"
-                    className="pagination-btn pagination-btn-next"
-                    onClick={handleNextPage}
-                    disabled={loadingSearch}
-                  >
-                    Next
-                    <ChevronRight size={18} />
-                  </button>
-                )}
-              </div>
-            )}
           </section>
         )}
       </main>

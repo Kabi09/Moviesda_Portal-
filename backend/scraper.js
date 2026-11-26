@@ -51,11 +51,24 @@ function extractYearFromTitle(title) {
   return m ? m[1] : '';
 }
 
+function derivePosterFromPath(href) {
+  if (!href) return undefined;
+  const slug = href.replace(/^\/+|\/+$/g, '');
+  const cleanSlug = slug
+    .replace(/-(?:tamil-)?(?:movie|web-series)(?:-moviesda)?(?:-download)?$/i, '')
+    .replace(/-moviesda$/i, '');
+  if (!cleanSlug) return undefined;
+  return `${BASE_URL}/uploads/posters/${cleanSlug}.jpg`;
+}
+
 function parseMovieElements($, matches, normQuery = '', searchType = 'name') {
   $('.f a').each((i, el) => {
     const title = $(el).text().trim();
     const href = $(el).attr('href');
     if (title && href) {
+      // Skip Moviesda directory navigation links wrapped in parentheses like "(Tamil 2025 Movies)"
+      if (/^\(.*\)$/.test(title)) return;
+
       let isMatch = false;
       if (!normQuery) {
         isMatch = true;
@@ -79,7 +92,8 @@ function parseMovieElements($, matches, normQuery = '', searchType = 'name') {
           matches.push({
             title,
             path: href,
-            url: href.startsWith('http') ? href : `${BASE_URL}${href}`
+            url: href.startsWith('http') ? href : `${BASE_URL}${href}`,
+            poster: derivePosterFromPath(href)
           });
         }
       }
@@ -87,10 +101,11 @@ function parseMovieElements($, matches, normQuery = '', searchType = 'name') {
   });
 }
 
-async function enrichPosters(movieList) {
-  console.error(`[Search] Enriching poster images for ${movieList.length} movies in parallel...`);
-  return Promise.all(
-    movieList.map(async (match) => {
+async function enrichPosters(movieList, maxScraped = 30) {
+  const toScrape = movieList.slice(0, maxScraped);
+  console.error(`[Search] Enriching exact poster images for ${toScrape.length} of ${movieList.length} movies in parallel...`);
+  await Promise.all(
+    toScrape.map(async (match) => {
       try {
         const html = await fetchPage(match.url);
         const $ = cheerio.load(html);
@@ -107,74 +122,56 @@ async function enrichPosters(movieList) {
       return match;
     })
   );
+  return movieList;
 }
 
-// Fast paginated fetch for a specific directory path (e.g. '/tamil-2026-movies/' or '/actor-vijay-movies-collection/')
-async function fetchDirectoryMoviesPaginated(dirPath, page = 1, limit = 15, extraFields = {}) {
-  const ITEMS_PER_SITE_PAGE = 20;
-  const startIndex = (page - 1) * limit;
-  const endIndex = page * limit;
-  const sitePageStart = Math.floor(startIndex / ITEMS_PER_SITE_PAGE) + 1;
-  const sitePageEnd = Math.floor((endIndex - 1) / ITEMS_PER_SITE_PAGE) + 1;
-
+// Fetch ALL movies across all pages of a specific directory path (e.g. '/tamil-2026-movies/' or '/actor-vijay-movies-collection/')
+async function fetchDirectoryMoviesPaginated(dirPath, _page = 1, _limit = 0, extraFields = {}) {
   const normalizedPath = dirPath.startsWith('/') ? dirPath : `/${dirPath}`;
   const baseDirUrl = `${BASE_URL}${normalizedPath}`;
-  console.error(`[Directory Paginated] Fetching ${baseDirUrl} (UI page ${page}, site pages ${sitePageStart}..${sitePageEnd})`);
+  console.error(`[Directory All] Fetching all pages of ${baseDirUrl}`);
 
   try {
-    const firstSiteUrl = sitePageStart === 1 ? baseDirUrl : `${baseDirUrl}?page=${sitePageStart}`;
-    const firstHtml = await fetchPage(firstSiteUrl);
+    const firstHtml = await fetchPage(baseDirUrl);
     const $first = cheerio.load(firstHtml);
 
     const totalSitePages = parseInt($first('#totalPages').text().trim()) || 1;
-    if (sitePageStart > totalSitePages) {
-      return {
-        movies: [],
-        page,
-        limit,
-        totalPages: Math.ceil((totalSitePages * ITEMS_PER_SITE_PAGE) / limit),
-        hasMore: false,
-        baseUrl: BASE_URL,
-        ...extraFields
-      };
-    }
-
     const collected = [];
     parseMovieElements($first, collected, '');
 
-    if (sitePageEnd > sitePageStart && sitePageEnd <= totalSitePages) {
-      for (let sp = sitePageStart + 1; sp <= sitePageEnd; sp++) {
-        try {
-          const spHtml = await fetchPage(`${baseDirUrl}?page=${sp}`);
+    if (totalSitePages > 1) {
+      const pageNumbers = Array.from({ length: totalSitePages - 1 }, (_, i) => i + 2);
+      const pageHtmls = await Promise.all(
+        pageNumbers.map(sp =>
+          fetchPage(`${baseDirUrl}?page=${sp}`).catch(err => {
+            console.error(`[Directory All] Failed fetching site page ${sp}:`, err.message);
+            return '';
+          })
+        )
+      );
+      for (const spHtml of pageHtmls) {
+        if (spHtml) {
           const $sp = cheerio.load(spHtml);
           parseMovieElements($sp, collected, '');
-        } catch (err) {
-          console.error(`[Directory Paginated] Failed fetching site page ${sp}:`, err.message);
         }
       }
     }
 
-    const localOffset = startIndex - (sitePageStart - 1) * ITEMS_PER_SITE_PAGE;
-    const pageSlice = collected.slice(localOffset, localOffset + limit);
-    const enriched = await enrichPosters(pageSlice);
-
-    const estimatedTotal = (totalSitePages - 1) * ITEMS_PER_SITE_PAGE + (sitePageEnd === totalSitePages ? collected.length - (sitePageEnd - sitePageStart) * ITEMS_PER_SITE_PAGE : ITEMS_PER_SITE_PAGE);
-    const totalUiPages = Math.max(1, Math.ceil((totalSitePages * ITEMS_PER_SITE_PAGE) / limit));
-    const hasMore = sitePageEnd < totalSitePages || (localOffset + limit < collected.length);
+    await enrichPosters(collected, 30);
 
     return {
-      movies: enriched,
-      page,
-      limit,
-      totalPages: totalUiPages,
-      total: estimatedTotal,
-      hasMore,
+      movies: collected,
+      page: 1,
+      limit: collected.length,
+      totalPages: 1,
+      total: collected.length,
+      hasMore: false,
       baseUrl: BASE_URL,
       ...extraFields
     };
   } catch (error) {
-    console.error(`[Directory Paginated] Failed fetching ${dirPath}:`, error);
-    return { movies: [], page, limit, totalPages: 1, hasMore: false, baseUrl: BASE_URL, ...extraFields };
+    console.error(`[Directory All] Failed fetching ${dirPath}:`, error);
+    return { movies: [], page: 1, limit: 0, totalPages: 1, total: 0, hasMore: false, baseUrl: BASE_URL, ...extraFields };
   }
 }
 
@@ -538,7 +535,7 @@ export async function searchMovies(query, page = 1, limit = 15, searchType = 'na
     });
   }
 
-  // Initial load ('latest' or empty) shows latest 2026 movies
+  // Initial load ('latest' or empty) shows all latest 2026 movies
   if (!normQuery || normQuery === 'latest') {
     return fetchYearMoviesPaginated('2026', safePage, safeLimit);
   }
@@ -584,22 +581,20 @@ export async function searchMovies(query, page = 1, limit = 15, searchType = 'na
       }
     }
 
-    const startIndex = (safePage - 1) * safeLimit;
-    const endIndex = safePage * safeLimit;
-    const enriched = await enrichPosters(yearMatches.slice(startIndex, endIndex));
+    const enriched = await enrichPosters(yearMatches, 30);
     return {
       movies: enriched,
-      page: safePage,
-      limit: safeLimit,
+      page: 1,
+      limit: enriched.length,
       total: yearMatches.length,
-      totalPages: Math.max(1, Math.ceil(yearMatches.length / safeLimit)),
-      hasMore: endIndex < yearMatches.length,
+      totalPages: 1,
+      hasMore: false,
       baseUrl: BASE_URL
     };
   }
 
   // Movie Name search mode (default)
-  console.error(`[Search] Running Movie Name search for '${query}' (page ${safePage}, limit ${safeLimit})...`);
+  console.error(`[Search] Running Movie Name search for '${query}' (all results)...`);
   const firstChar = normQuery.charAt(0);
   const isAlphaStart = /[a-z]/.test(firstChar);
 
@@ -652,19 +647,15 @@ export async function searchMovies(query, page = 1, limit = 15, searchType = 'na
 
   sortMovieNameMatches(matches, normQuery);
 
-  const startIndex = (safePage - 1) * safeLimit;
-  const endIndex = safePage * safeLimit;
-  const pageMatches = matches.slice(startIndex, endIndex);
-  const enrichedMatches = await enrichPosters(pageMatches);
-  const totalPages = Math.max(1, Math.ceil(matches.length / safeLimit));
+  const enrichedMatches = await enrichPosters(matches, 30);
 
   return {
     movies: enrichedMatches,
-    page: safePage,
-    limit: safeLimit,
+    page: 1,
+    limit: enrichedMatches.length,
     total: matches.length,
-    totalPages,
-    hasMore: endIndex < matches.length,
+    totalPages: 1,
+    hasMore: false,
     baseUrl: BASE_URL
   };
 }
