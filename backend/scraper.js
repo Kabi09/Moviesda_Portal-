@@ -23,8 +23,106 @@ if (fs.existsSync(envPath)) {
   }
 }
 
-export const BASE_URL = (process.env.BASE_URL || 'https://moviesda36.com').replace(/\/+$/, '');
-export const DUBBED_BASE_URL = (process.env.DUBBED_BASE_URL || 'https://isaidub.green').replace(/\/+$/, '');
+export let BASE_URL = (process.env.BASE_URL || 'https://moviesda36.com').replace(/\/+$/, '');
+export let DUBBED_BASE_URL = (process.env.DUBBED_BASE_URL || 'https://isaidub.green').replace(/\/+$/, '');
+
+const CLOUD_CONFIG_URL =
+  process.env.CLOUD_CONFIG_URL ||
+  'https://api.restful-api.dev/objects/ff808181a09d98f701a21793643554a5';
+
+let lastCloudSyncAt = 0;
+const CLOUD_SYNC_TTL_MS = 60 * 1000; // Check cloud store at most once per 60s per instance
+
+export async function ensureDomainsSynced(force = false) {
+  const now = Date.now();
+  if (!force && now - lastCloudSyncAt < CLOUD_SYNC_TTL_MS) {
+    return { baseUrl: BASE_URL, dubbedBaseUrl: DUBBED_BASE_URL };
+  }
+  lastCloudSyncAt = now;
+
+  try {
+    const res = await fetch(CLOUD_CONFIG_URL, {
+      headers: { 'Accept': 'application/json' }
+    });
+    if (res.ok) {
+      const json = await res.json();
+      const cloudBase = json?.data?.baseUrl?.trim()?.replace(/\/+$/, '');
+      const cloudDubbed = json?.data?.dubbedBaseUrl?.trim()?.replace(/\/+$/, '');
+      if (cloudBase && /^https?:\/\//i.test(cloudBase)) {
+        BASE_URL = cloudBase;
+        process.env.BASE_URL = cloudBase;
+      }
+      if (cloudDubbed && /^https?:\/\//i.test(cloudDubbed)) {
+        DUBBED_BASE_URL = cloudDubbed;
+        process.env.DUBBED_BASE_URL = cloudDubbed;
+      }
+    }
+  } catch (err) {
+    console.error('[Domain Sync] Cloud config fetch warning:', err.message);
+  }
+
+  return { baseUrl: BASE_URL, dubbedBaseUrl: DUBBED_BASE_URL };
+}
+
+export async function getActiveDomains() {
+  return ensureDomainsSynced(true);
+}
+
+export async function updateActiveDomains({ baseUrl, dubbedBaseUrl }) {
+  const cleanBase = (baseUrl || BASE_URL).trim().replace(/\/+$/, '');
+  const cleanDubbed = (dubbedBaseUrl || DUBBED_BASE_URL).trim().replace(/\/+$/, '');
+
+  if (!/^https?:\/\//i.test(cleanBase) || !/^https?:\/\//i.test(cleanDubbed)) {
+    throw new Error('Both URLs must start with http:// or https://');
+  }
+
+  BASE_URL = cleanBase;
+  DUBBED_BASE_URL = cleanDubbed;
+  process.env.BASE_URL = cleanBase;
+  process.env.DUBBED_BASE_URL = cleanDubbed;
+  cachedActorsList = null;
+  lastCloudSyncAt = Date.now();
+
+  // 1. Persist globally to Cloud Store (works across all Vercel Serverless instances)
+  try {
+    await fetch(CLOUD_CONFIG_URL, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: 'moviesda-domains-config',
+        data: {
+          baseUrl: cleanBase,
+          dubbedBaseUrl: cleanDubbed,
+          updatedAt: new Date().toISOString()
+        }
+      })
+    });
+  } catch (err) {
+    console.error('[Domain Update] Cloud store update warning:', err.message);
+  }
+
+  // 2. Also update local backend/.env if filesystem is writable
+  try {
+    if (fs.existsSync(envPath)) {
+      let envText = fs.readFileSync(envPath, 'utf8');
+      if (/^BASE_URL=/m.test(envText)) {
+        envText = envText.replace(/^BASE_URL=.*$/m, `BASE_URL=${cleanBase}`);
+      } else {
+        envText += `\nBASE_URL=${cleanBase}`;
+      }
+      if (/^DUBBED_BASE_URL=/m.test(envText)) {
+        envText = envText.replace(/^DUBBED_BASE_URL=.*$/m, `DUBBED_BASE_URL=${cleanDubbed}`);
+      } else {
+        envText += `\nDUBBED_BASE_URL=${cleanDubbed}`;
+      }
+      fs.writeFileSync(envPath, envText, 'utf8');
+    }
+  } catch (err) {
+    // Ignore read-only filesystem on Vercel serverless
+  }
+
+  return { baseUrl: BASE_URL, dubbedBaseUrl: DUBBED_BASE_URL };
+}
 
 async function fetchPage(url) {
   try {
@@ -916,6 +1014,7 @@ function deduplicateMoviesByTitle(matches) {
 }
 
 export async function searchMovies(query, page = 1, limit = 25, searchType = 'name', category = 'tamil') {
+  await ensureDomainsSynced();
   const safePage = Math.max(1, parseInt(page) || 1);
   const safeLimit = Math.max(1, parseInt(limit) || 25);
   if ((category || 'tamil').toLowerCase().trim() === 'dubbed') {
@@ -1179,6 +1278,7 @@ function formatFolderBreadcrumb(breadcrumbs, fileName = '') {
 
 // Recursively find all download links starting from a movie/collection/webseries page path/URL
 export async function extractDownloadLinks(moviePath, category = '') {
+  await ensureDomainsSynced();
   const isDubbed =
     (category || '').toLowerCase() === 'dubbed' ||
     moviePath.includes('isaidub') ||

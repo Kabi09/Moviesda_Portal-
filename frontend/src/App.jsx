@@ -50,6 +50,16 @@ export default function App() {
   const [searched, setSearched] = useState(false);
   const [actors, setActors] = useState([]);
   const [selectedActor, setSelectedActor] = useState(null);
+  const [isDomainPage, setIsDomainPage] = useState(
+    typeof window !== 'undefined' &&
+      window.location.pathname.replace(/\/+$/, '').toLowerCase() === '/domain'
+  );
+  const [tamilUrlInput, setTamilUrlInput] = useState('');
+  const [hollywoodUrlInput, setHollywoodUrlInput] = useState('');
+  const [loadingDomains, setLoadingDomains] = useState(false);
+  const [savingDomains, setSavingDomains] = useState(false);
+  const [domainMessage, setDomainMessage] = useState('');
+  const [domainError, setDomainError] = useState('');
   const resultsSectionRef = useRef(null);
   const shouldScrollToResultsRef = useRef(false);
 
@@ -124,8 +134,68 @@ export default function App() {
   }, [loadingSearch, movies]);
 
   useEffect(() => {
-    fetchMovies('latest', 1, 'name', false, 'tamil');
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    const onPopState = () => {
+      setIsDomainPage(
+        window.location.pathname.replace(/\/+$/, '').toLowerCase() === '/domain'
+      );
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+
+  useEffect(() => {
+    if (isDomainPage) {
+      setLoadingDomains(true);
+      setDomainError('');
+      fetch(`${API_BASE}/domain`)
+        .then((r) => r.json())
+        .then((d) => {
+          setTamilUrlInput(d.baseUrl || 'https://moviesda36.com');
+          setHollywoodUrlInput(d.dubbedBaseUrl || 'https://isaidub.green');
+        })
+        .catch(() => {
+          setDomainError('Failed to load current domain configuration.');
+        })
+        .finally(() => {
+          setLoadingDomains(false);
+        });
+    } else {
+      fetchMovies('latest', 1, 'name', false, 'tamil');
+    }
+  }, [isDomainPage]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleSaveDomains = async (e) => {
+    e.preventDefault();
+    setSavingDomains(true);
+    setDomainMessage('');
+    setDomainError('');
+    try {
+      const res = await fetch(`${API_BASE}/domain`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          baseUrl: tamilUrlInput.trim(),
+          dubbedBaseUrl: hollywoodUrlInput.trim()
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to update domains');
+      }
+      setTamilUrlInput(data.baseUrl);
+      setHollywoodUrlInput(data.dubbedBaseUrl);
+      setDomainMessage('Domains updated globally without redeployment!');
+    } catch (err) {
+      setDomainError(err.message || 'Failed to save domain URLs.');
+    } finally {
+      setSavingDomains(false);
+    }
+  };
+
+  const navigateHome = () => {
+    window.history.pushState({}, '', '/');
+    setIsDomainPage(false);
+  };
 
   const handleCategoryChange = async (newCategory) => {
     if (newCategory === category) return;
@@ -277,6 +347,102 @@ export default function App() {
   const cleanTitle = (title) => {
     return title.replace(/\s*\(\d{4}\)\s*/g, '').trim();
   };
+
+  if (isDomainPage) {
+    return (
+      <div className="app-container">
+        <header className="site-header">
+          <div className="logo-wrapper">
+            <h1 className="gradient-title">Domain Configuration</h1>
+            <span className="subtitle">Update Source URLs Without Redeployment</span>
+          </div>
+        </header>
+
+        <main style={{ display: 'flex', justifyContent: 'center', alignItems: 'flex-start' }}>
+          <div className="glass-card domain-config-card">
+            {loadingDomains ? (
+              <div className="loader-container" style={{ padding: '2rem 0' }}>
+                <div className="pulse-spinner"></div>
+                <span className="loading-text">Loading current domains...</span>
+              </div>
+            ) : (
+              <form className="domain-config-form" onSubmit={handleSaveDomains}>
+                <div className="domain-field-group">
+                  <label className="domain-label" htmlFor="tamil-url-input">
+                    <Film size={16} />
+                    Tamil Movies Base URL
+                  </label>
+                  <input
+                    id="tamil-url-input"
+                    type="url"
+                    className="domain-input"
+                    placeholder="https://moviesda36.com"
+                    value={tamilUrlInput}
+                    onChange={(e) => setTamilUrlInput(e.target.value)}
+                    required
+                  />
+                </div>
+
+                <div className="domain-field-group">
+                  <label className="domain-label" htmlFor="hollywood-url-input">
+                    <Globe size={16} />
+                    Hollywood Movies Base URL
+                  </label>
+                  <input
+                    id="hollywood-url-input"
+                    type="url"
+                    className="domain-input"
+                    placeholder="https://isaidub.green"
+                    value={hollywoodUrlInput}
+                    onChange={(e) => setHollywoodUrlInput(e.target.value)}
+                    required
+                  />
+                </div>
+
+                {domainError && (
+                  <div className="domain-alert domain-alert-error">
+                    <AlertCircle size={18} />
+                    <span>{domainError}</span>
+                  </div>
+                )}
+
+                {domainMessage && (
+                  <div className="domain-alert domain-alert-success">
+                    <span>✓ {domainMessage}</span>
+                  </div>
+                )}
+
+                <div className="domain-actions-row">
+                  <button
+                    type="button"
+                    className="pagination-btn pagination-btn-prev"
+                    onClick={navigateHome}
+                  >
+                    <ChevronLeft size={18} />
+                    Back to Home
+                  </button>
+                  <button
+                    type="submit"
+                    className="search-button"
+                    disabled={savingDomains}
+                  >
+                    {savingDomains ? 'Saving...' : 'Save & Apply Domains'}
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </main>
+
+        <footer className="site-footer">
+          <p>
+            Developed with <Heart className="heart-icon" size={16} /> by{' '}
+            <a href="https://www.kabilan.in" target="_blank" rel="noopener noreferrer" className="developer-name">Kabilan</a> &copy; 2026
+          </p>
+        </footer>
+      </div>
+    );
+  }
 
   return (
     <div className="app-container">

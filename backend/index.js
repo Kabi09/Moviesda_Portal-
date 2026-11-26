@@ -9,7 +9,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as http from 'http';
 import { fileURLToPath } from 'url';
-import { searchMovies, extractDownloadLinks } from './scraper.js';
+import { searchMovies, extractDownloadLinks, getActiveDomains, updateActiveDomains } from './scraper.js';
 
 // Parse .env manually for portability
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -151,6 +151,39 @@ async function main() {
       }
 
       const url = new URL(req.url, `http://${req.headers.host}`);
+
+      // REST API Domain Config endpoint (GET & POST /api/domain)
+      if (url.pathname === '/api/domain') {
+        if (req.method === 'GET') {
+          try {
+            const domains = await getActiveDomains();
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(domains));
+          } catch (err) {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: err.message }));
+          }
+          return;
+        }
+        if (req.method === 'POST') {
+          let body = '';
+          req.on('data', (chunk) => {
+            body += chunk.toString();
+          });
+          req.on('end', async () => {
+            try {
+              const payload = JSON.parse(body || '{}');
+              const updated = await updateActiveDomains(payload);
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify(updated));
+            } catch (err) {
+              res.writeHead(400, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: err.message }));
+            }
+          });
+          return;
+        }
+      }
 
       // REST API Search endpoint
       if (req.method === 'GET' && url.pathname === '/api/search') {

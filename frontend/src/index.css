@@ -1312,6 +1312,83 @@ main {
   border-radius: 6px;
 }
 
+/* /domain Configuration Page Styles */
+.domain-config-card {
+  width: 100%;
+  max-width: 580px;
+  padding: 2.2rem;
+}
+
+.domain-config-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1.4rem;
+}
+
+.domain-field-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.domain-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.domain-input {
+  width: 100%;
+  padding: 0.85rem 1.1rem;
+  border-radius: 12px;
+  border: 1px solid var(--border-glass);
+  background: rgba(10, 13, 20, 0.75);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 1rem;
+  outline: none;
+  transition: var(--transition-smooth);
+}
+
+.domain-input:focus {
+  border-color: var(--accent-coral);
+  box-shadow: var(--shadow-glow);
+}
+
+.domain-alert {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.85rem 1.1rem;
+  border-radius: 10px;
+  font-size: 0.92rem;
+  font-weight: 500;
+}
+
+.domain-alert-error {
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  color: #fca5a5;
+}
+
+.domain-alert-success {
+  background: rgba(16, 185, 129, 0.12);
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  color: #6ee7b7;
+}
+
+.domain-actions-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  margin-top: 0.4rem;
+  flex-wrap: wrap;
+}
+
 .search-mode-tab {
   display: inline-flex;
   align-items: center;
