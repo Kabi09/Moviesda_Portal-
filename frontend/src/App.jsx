@@ -164,17 +164,16 @@ export default function App() {
   const handleTabChange = async (newType) => {
     if (newType === searchType) return;
     setSearchType(newType);
-    setQuery('');
     if (newType === 'actor') {
+      setQuery('');
       await fetchMovies('Vijay', 1, 'actor', false, category);
     } else if (newType === 'year') {
       setSelectedActor(null);
+      setQuery(CURRENT_YEAR);
       await fetchMovies(CURRENT_YEAR, 1, 'year', false, category);
-    } else if (newType === 'collection' || newType === 'webseries') {
-      setSelectedActor(null);
-      await fetchMovies('latest', 1, newType, false, category);
     } else {
       setSelectedActor(null);
+      setQuery('');
       await fetchMovies('latest', 1, 'name', false, category);
     }
   };
@@ -191,11 +190,18 @@ export default function App() {
   const handleClearSearch = async () => {
     setQuery('');
     // Stay on the current active toggle (searchType & category)
-    if (searchType === 'actor') {
-      await fetchMovies('Vijay', 1, 'actor', false, category);
-    } else if (searchType === 'year') {
+    if (searchType === 'year') {
       setSelectedActor(null);
-      await fetchMovies(CURRENT_YEAR, 1, 'year', false, category);
+      setMovies([]);
+      setSearched(false);
+      setHasMore(false);
+      setTotalPages(1);
+    } else if (searchType === 'actor') {
+      setSelectedActor(null);
+      setMovies([]);
+      setSearched(false);
+      setHasMore(false);
+      setTotalPages(1);
     } else {
       setSelectedActor(null);
       if (activeQuery !== 'latest' || activeSearchType !== 'name' || page !== 1) {
@@ -365,7 +371,7 @@ export default function App() {
                 onChange={(e) => setQuery(e.target.value)}
                 disabled={loadingSearch || loadingDownloads}
               />
-              {(query.length > 0 || activeQuery !== 'latest') && (
+              {(query.length > 0 || (searchType === 'name' && activeQuery !== 'latest')) && (
                 <button
                   type="button"
                   className="search-clear-btn"
