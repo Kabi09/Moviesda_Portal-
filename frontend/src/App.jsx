@@ -37,7 +37,11 @@ export default function App() {
   const [totalPages, setTotalPages] = useState(1);
   const [hasMore, setHasMore] = useState(false);
   const [movies, setMovies] = useState([]);
+  const [proxyPosters, setProxyPosters] = useState({});
   const [brokenPosters, setBrokenPosters] = useState({});
+  const [isMobileView, setIsMobileView] = useState(
+    typeof window !== 'undefined' && window.innerWidth <= 600
+  );
   const [selectedMovie, setSelectedMovie] = useState(null);
   const [downloads, setDownloads] = useState([]);
   const [activeSeason, setActiveSeason] = useState('ALL');
@@ -107,6 +111,7 @@ export default function App() {
     setError('');
     setSearched(true);
     setMovies([]);
+    setProxyPosters({});
     setBrokenPosters({});
     shouldScrollToResultsRef.current = autoScroll;
 
@@ -176,8 +181,15 @@ export default function App() {
         window.location.pathname.replace(/\/+$/, '').toLowerCase() === '/domain'
       );
     };
+    const onResize = () => {
+      setIsMobileView(window.innerWidth <= 600);
+    };
     window.addEventListener('popstate', onPopState);
-    return () => window.removeEventListener('popstate', onPopState);
+    window.addEventListener('resize', onResize);
+    return () => {
+      window.removeEventListener('popstate', onPopState);
+      window.removeEventListener('resize', onResize);
+    };
   }, []);
 
   useEffect(() => {
@@ -239,10 +251,21 @@ export default function App() {
   const handleCategoryChange = async (newCategory) => {
     if (newCategory === category) return;
     setCategory(newCategory);
-    setSearchType('name');
-    setQuery('');
     setSelectedActor(null);
-    await fetchMovies('latest', 1, 'name', false, newCategory);
+
+    if (searchType === 'actor') {
+      setSearchType('name');
+      setQuery('');
+      await fetchMovies('latest', 1, 'name', false, newCategory);
+      return;
+    }
+
+    const cleanQuery = query.trim();
+    if (cleanQuery) {
+      await fetchMovies(cleanQuery, 1, searchType, false, newCategory);
+    } else {
+      await fetchMovies('latest', 1, searchType, false, newCategory);
+    }
   };
 
   const handleSearch = async (e) => {
@@ -586,12 +609,20 @@ export default function App() {
                 className="search-input"
                 placeholder={
                   searchType === 'year'
-                    ? 'Search by release year (e.g. 2026, 2025, 2018)...'
+                    ? isMobileView
+                      ? 'Year: 2026, 2025, 2018...'
+                      : 'Search by release year (e.g. 2026, 2025, 2018)...'
                     : searchType === 'actor'
-                      ? 'Search or filter actor name (e.g. Vijay, Ajith, Suriya, Dhanush)...'
+                      ? isMobileView
+                        ? 'Actor: Vijay, Ajith, Suriya...'
+                        : 'Search or filter actor name (e.g. Vijay, Ajith, Suriya, Dhanush)...'
                       : category === 'dubbed'
-                        ? 'Search Hollywood movies, web series, collections (e.g. Spiderman, Matrix, Money Heist)...'
-                        : 'Search movie name (e.g. Dude, 96, Leo, Karuppu, Soorarai Pottru, )...'
+                        ? isMobileView
+                          ? 'Search: Spiderman, Avengers, Matrix...'
+                          : 'Search Hollywood movies (e.g. Spiderman, Avengers, Matrix, Money Heist)...'
+                        : isMobileView
+                          ? 'Search: Dude, 96, Leo, Karuppu...'
+                          : 'Search movie name (e.g. Dude, 96, Leo, Karuppu, Soorarai Pottru)...'
                 }
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
@@ -724,27 +755,45 @@ export default function App() {
                   onClick={() => handleFetchDownloads(movie)}
                 >
                   <div className="card-poster-wrapper">
-                    {movie.poster && !brokenPosters[movie.path || idx] ? (
-                      <img
-                        src={movie.poster}
-                        alt={movie.title}
-                        className="card-poster-img"
-                        loading="lazy"
-                        onError={() =>
-                          setBrokenPosters((prev) => ({
-                            ...prev,
-                            [movie.path || idx]: true
-                          }))
-                        }
-                      />
-                    ) : (
-                      <img
-                        src={imageNotFound}
-                        alt={`${movie.title} - Image Not Found`}
-                        className="card-poster-img card-poster-fallback"
-                        loading="lazy"
-                      />
-                    )}
+                    {(() => {
+                      const cardKey = movie.path || idx;
+                      const proxyUrl = `${API_BASE}/image?url=${encodeURIComponent(movie.poster || '')}&pageUrl=${encodeURIComponent(movie.url || '')}&title=${encodeURIComponent(movie.title || '')}`;
+                      const useProxy = !movie.poster || proxyPosters[cardKey];
+
+                      if (brokenPosters[cardKey]) {
+                        return (
+                          <img
+                            src={imageNotFound}
+                            alt={`${movie.title} - Image Not Found`}
+                            className="card-poster-img card-poster-fallback"
+                            loading="lazy"
+                          />
+                        );
+                      }
+
+                      return (
+                        <img
+                          src={useProxy ? proxyUrl : movie.poster}
+                          alt={movie.title}
+                          className="card-poster-img"
+                          loading="lazy"
+                          referrerPolicy="no-referrer"
+                          onError={() => {
+                            if (!useProxy) {
+                              setProxyPosters((prev) => ({
+                                ...prev,
+                                [cardKey]: true
+                              }));
+                            } else {
+                              setBrokenPosters((prev) => ({
+                                ...prev,
+                                [cardKey]: true
+                              }));
+                            }
+                          }}
+                        />
+                      );
+                    })()}
                     <span className="badge-year-floating">{extractYear(movie.title)}</span>
                   </div>
 
@@ -848,13 +897,20 @@ export default function App() {
                   <div className="movie-details-panel">
                     <div className="poster-container">
                       <img
-                        src={movieDetails.poster || imageNotFound}
+                        src={movieDetails.poster || `${API_BASE}/image?pageUrl=${encodeURIComponent(selectedMovie?.url || '')}&title=${encodeURIComponent(selectedMovie?.title || '')}`}
                         alt={`${movieDetails.title || 'Movie'} Poster`}
-                        className={`poster-img ${!movieDetails.poster ? 'card-poster-fallback' : ''}`}
+                        className="poster-img"
+                        referrerPolicy="no-referrer"
                         onError={(e) => {
-                          e.currentTarget.onerror = null;
-                          e.currentTarget.src = imageNotFound;
-                          e.currentTarget.classList.add('card-poster-fallback');
+                          const proxyFallback = `${API_BASE}/image?url=${encodeURIComponent(movieDetails.poster || '')}&pageUrl=${encodeURIComponent(selectedMovie?.url || '')}&title=${encodeURIComponent(selectedMovie?.title || '')}`;
+                          if (!e.currentTarget.dataset.proxied && movieDetails.poster) {
+                            e.currentTarget.dataset.proxied = 'true';
+                            e.currentTarget.src = proxyFallback;
+                          } else {
+                            e.currentTarget.onerror = null;
+                            e.currentTarget.src = imageNotFound;
+                            e.currentTarget.classList.add('card-poster-fallback');
+                          }
                         }}
                       />
                     </div>
@@ -951,7 +1007,7 @@ export default function App() {
 
                         // Exclude 1-minute sample files if full files exist
                         const nonSampleDownloads = downloads.filter(
-                          (f) => !/\bsample(?:\.mp4)?$/i.test((f.fileName || '').trim())
+                          (f) => !/\bsample\b/i.test((f.fileName || '').trim())
                         );
                         const baseDownloads = nonSampleDownloads.length > 0 ? nonSampleDownloads : downloads;
 

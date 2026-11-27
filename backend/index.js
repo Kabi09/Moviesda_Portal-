@@ -9,7 +9,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as http from 'http';
 import { fileURLToPath } from 'url';
-import { searchMovies, extractDownloadLinks, getActiveDomains, updateActiveDomains } from './scraper.js';
+import { searchMovies, extractDownloadLinks, getActiveDomains, updateActiveDomains, resolvePosterImage } from './scraper.js';
 
 // Parse .env manually for portability
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -183,6 +183,30 @@ async function main() {
           });
           return;
         }
+      }
+
+      // REST API Poster Image Proxy & Auto-Resolver endpoint
+      if (req.method === 'GET' && url.pathname === '/api/image') {
+        const imgUrl = url.searchParams.get('url') || '';
+        const pageUrl = url.searchParams.get('pageUrl') || '';
+        const title = url.searchParams.get('title') || '';
+        try {
+          const result = await resolvePosterImage({ url: imgUrl, pageUrl, title });
+          if (!result) {
+            res.writeHead(404, { 'Content-Type': 'text/plain' });
+            res.end('Image Not Found');
+            return;
+          }
+          res.writeHead(200, {
+            'Content-Type': result.contentType,
+            'Cache-Control': 'public, max-age=86400'
+          });
+          res.end(result.buffer);
+        } catch (err) {
+          res.writeHead(500, { 'Content-Type': 'text/plain' });
+          res.end(err.message);
+        }
+        return;
       }
 
       // REST API Search endpoint

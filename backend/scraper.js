@@ -235,11 +235,13 @@ async function enrichPosters(movieList, maxScraped = 30) {
         const html = await fetchPage(match.url);
         const $ = cheerio.load(html);
         const imgEl = $('#movie-info').find('picture img, img').first();
-        if (imgEl.length > 0) {
-          const src = imgEl.attr('src');
-          if (src) {
-            match.poster = src.startsWith('http') ? src : `${BASE_URL}${src}`;
-          }
+        const src = imgEl.length > 0 ? imgEl.attr('src') : '';
+        if (src) {
+          match.poster = src.startsWith('http') ? src : `${BASE_URL}${src}`;
+        } else {
+          // Page has no poster on moviesda; try IMDb poster lookup instead of keeping a 404 derived slug URL
+          const imdbPoster = await fetchImdbPoster(match.title);
+          match.poster = imdbPoster || undefined;
         }
       } catch (err) {
         console.error(`[Search] Failed to fetch poster for ${match.title}:`, err.message);
@@ -248,6 +250,72 @@ async function enrichPosters(movieList, maxScraped = 30) {
     })
   );
   return movieList;
+}
+
+const IMAGE_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36',
+  'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8'
+};
+
+async function tryFetchImageBytes(imgUrl) {
+  if (!imgUrl || !/^https?:\/\//i.test(imgUrl)) return null;
+  try {
+    const res = await fetch(imgUrl, { headers: IMAGE_HEADERS });
+    if (!res.ok) return null;
+    const contentType = res.headers.get('content-type') || '';
+    if (!contentType.startsWith('image/')) return null;
+    const arrayBuf = await res.arrayBuffer();
+    if (!arrayBuf || arrayBuf.byteLength < 200) return null;
+    return {
+      buffer: Buffer.from(arrayBuf),
+      contentType
+    };
+  } catch (err) {
+    return null;
+  }
+}
+
+// Resolve and proxy poster image bytes (bypasses mobile/laptop ISP blocks on moviesda and recovers 404 derived poster slugs)
+export async function resolvePosterImage({ url = '', pageUrl = '', title = '' }) {
+  await ensureDomainsSynced();
+
+  // 1. Try fetching the provided poster URL directly from the backend
+  if (url) {
+    const directImg = await tryFetchImageBytes(url);
+    if (directImg) return directImg;
+  }
+
+  // 2. If direct URL 404'd (e.g. derived slug mismatch), scrape the actual movie page for #movie-info img
+  if (pageUrl && /^https?:\/\//i.test(pageUrl)) {
+    try {
+      const html = await fetchPage(pageUrl);
+      const $ = cheerio.load(html);
+      const src =
+        $('#movie-info').find('picture img, img').first().attr('src') ||
+        $('.albumcover img, .tblimg img').first().attr('src');
+      if (src) {
+        const origin = new URL(pageUrl).origin;
+        const resolvedSrc = src.startsWith('http') ? src : `${origin}${src}`;
+        if (resolvedSrc !== url) {
+          const pageImg = await tryFetchImageBytes(resolvedSrc);
+          if (pageImg) return pageImg;
+        }
+      }
+    } catch (err) {
+      // Fall through to IMDb poster lookup
+    }
+  }
+
+  // 3. Fallback to IMDb poster lookup by title
+  if (title) {
+    const imdbUrl = await fetchImdbPoster(title);
+    if (imdbUrl && imdbUrl !== url) {
+      const imdbImg = await tryFetchImageBytes(imdbUrl);
+      if (imdbImg) return imdbImg;
+    }
+  }
+
+  return null;
 }
 
 // Fetch ALL movies across all pages of a specific directory path (e.g. '/tamil-2026-movies/' or '/actor-vijay-movies-collection/')
@@ -1253,7 +1321,7 @@ function extractSeasonLabel(breadcrumbs = [], fileName = '') {
   return '';
 }
 
-function formatFolderBreadcrumb(breadcrumbs, fileName = '') {
+function formatFolderBreadcrumb(breadcrumbs, fileName = '', topLevelFolderCount = 1) {
   // Check if fileName has an Episode number (e.g. "Epi 01", "Episode 1", "EP 02")
   const epiMatch = (fileName || '').match(/\b(?:epi(?:sode)?|ep)\s*[-:.]?\s*(\d{1,3})\b/i);
   if (epiMatch) {
@@ -1263,10 +1331,15 @@ function formatFolderBreadcrumb(breadcrumbs, fileName = '') {
 
   if (!breadcrumbs || breadcrumbs.length === 0) return '';
 
-  // Only keep top-level folder if it is a distinct Movie in a Collection (not "(Original)", "(Tamil)", "Season", or resolution like "(720p HD)")
   const firstFolder = breadcrumbs[0] || '';
-  const isQualityOrLangFolder = /\((?:original|tamil|dubbed|hd|360p|480p|720p|1080p|mp4|\d+x\d+|season\s*\d+)\)/i.test(firstFolder);
+  const printMatch = firstFolder.match(/\((original|hd\s*dvd|dvdscr|dvdrip|predvd|hd\s*tv|web\s*dl|bluray|tamil|dubbed)\)/i);
+
+  // If the movie page only has 1 top-level folder and it's just a standard quality/print folder (e.g. "Movie (Original)"), hide redundant folder label
+  const isQualityOrLangFolder = /\((?:original|tamil|dubbed|hd|hd\s*dvd|dvdscr|dvdrip|predvd|360p|480p|720p|1080p|mp4|\d+x\d+|season\s*\d+)\)/i.test(firstFolder);
   if (isQualityOrLangFolder) {
+    if (topLevelFolderCount > 1 && printMatch) {
+      return printMatch[1].toUpperCase() === 'ORIGINAL' ? 'Original' : printMatch[1];
+    }
     return '';
   }
 
@@ -1292,6 +1365,7 @@ export async function extractDownloadLinks(moviePath, category = '') {
   let movieInfo = null;
   let firstThumbnail = null;
   let rootTitle = '';
+  let rootFolderCount = 1;
 
   async function traverse(url, isStartPage = false, breadcrumbs = []) {
     if (visited.has(url)) return;
@@ -1353,8 +1427,8 @@ export async function extractDownloadLinks(moviePath, category = '') {
         seenFileIds.add(fileId);
 
         const rawTitle = linkEl.text().trim();
-        // Skip 1-minute sample video files
-        if (/\bsample(?:\.mp4)?$/i.test(rawTitle)) return;
+        // Skip 1-minute sample video files (e.g. "Sample.mp4", "Watchman Sample (480x320)")
+        if (/\bsample\b/i.test(rawTitle)) return;
 
         let fileSize = '';
         let format = '';
@@ -1376,7 +1450,7 @@ export async function extractDownloadLinks(moviePath, category = '') {
           format,
           pageUrl: href.startsWith('http') ? href : `${activeBaseUrl}${href}`,
           seasonGroup: extractSeasonLabel(breadcrumbs, rawTitle),
-          folderGroup: formatFolderBreadcrumb(breadcrumbs, rawTitle)
+          folderGroup: formatFolderBreadcrumb(breadcrumbs, rawTitle, rootFolderCount)
         });
       });
 
@@ -1395,13 +1469,13 @@ export async function extractDownloadLinks(moviePath, category = '') {
               resolution: details.resolution || '',
               format: details.format || item.format,
               seasonGroup: item.seasonGroup || extractSeasonLabel(breadcrumbs, resolvedName),
-              folderGroup: item.folderGroup || formatFolderBreadcrumb(breadcrumbs, resolvedName),
+              folderGroup: item.folderGroup || formatFolderBreadcrumb(breadcrumbs, resolvedName, rootFolderCount),
               servers,
               pageUrl: item.pageUrl
             };
           })
         );
-        filesList.push(...resolvedInline.filter(f => !/\bsample(?:\.mp4)?$/i.test(f.fileName)));
+        filesList.push(...resolvedInline.filter(f => !/\bsample\b/i.test(f.fileName)));
       }
 
       // Check if we are on a dedicated file description page (contains .songinfo or .dlink)
@@ -1528,7 +1602,7 @@ export async function extractDownloadLinks(moviePath, category = '') {
         }
 
         const finalFileName = fileName || $('title').text().trim();
-        if (/\bsample(?:\.mp4)?$/i.test(finalFileName)) {
+        if (/\bsample\b/i.test(finalFileName)) {
           return;
         }
         filesList.push({
@@ -1538,7 +1612,7 @@ export async function extractDownloadLinks(moviePath, category = '') {
           resolution,
           format,
           seasonGroup: extractSeasonLabel(breadcrumbs, finalFileName),
-          folderGroup: formatFolderBreadcrumb(breadcrumbs, finalFileName),
+          folderGroup: formatFolderBreadcrumb(breadcrumbs, finalFileName, rootFolderCount),
           servers,
           pageUrl: url
         });
@@ -1568,6 +1642,10 @@ export async function extractDownloadLinks(moviePath, category = '') {
           }
         }
       });
+
+      if (isStartPage) {
+        rootFolderCount = linksToFollow.length;
+      }
 
       await Promise.all(
         linksToFollow.map((nextItem) =>
