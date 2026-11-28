@@ -22,10 +22,15 @@ export default async function handler(req, res) {
   const category = req.query.category || 'tamil';
 
   try {
-    const results = await searchMovies(q, page, limit, type, category);
+    const results = await Promise.race([
+      searchMovies(q, page, limit, type, category),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Server Error: Request timed out after 15 seconds')), 15000)
+      )
+    ]);
     return res.status(200).json(results);
   } catch (err) {
     console.error('Vercel Search API Error:', err);
-    return res.status(500).json({ error: err.message });
+    return res.status(500).json({ error: err.message || 'Server Error' });
   }
 }

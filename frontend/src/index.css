@@ -223,16 +223,24 @@ main {
   font-family: var(--font-sans);
   transition: var(--transition-smooth);
   box-shadow: 0 4px 15px rgba(255, 107, 139, 0.3);
+  flex-shrink: 0;
 }
 
-.search-button:hover {
+.search-button:hover:not(:disabled) {
   filter: brightness(1.1);
   transform: scale(1.02);
   box-shadow: 0 6px 20px rgba(255, 107, 139, 0.45);
 }
 
-.search-button:active {
+.search-button:active:not(:disabled) {
   transform: scale(0.98);
+}
+
+.search-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  box-shadow: none;
+  filter: grayscale(0.25);
 }
 
 /* Movie Results List */

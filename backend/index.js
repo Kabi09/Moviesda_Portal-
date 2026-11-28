@@ -130,6 +130,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   }
 });
 
+// Helper to enforce a 15-second server timeout on API requests
+function withServerTimeout(promise, ms = 15000) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('Server Error: Request timed out after 15 seconds')), ms)
+    )
+  ]);
+}
+
 // Start Server (Stdio or SSE depending on configuration)
 async function main() {
   const transportMode = (process.env.TRANSPORT || 'stdio').toLowerCase().trim();
@@ -217,12 +227,12 @@ async function main() {
         const type = url.searchParams.get('type') || 'name';
         const category = url.searchParams.get('category') || 'tamil';
         try {
-          const results = await searchMovies(q, page, limit, type, category);
+          const results = await withServerTimeout(searchMovies(q, page, limit, type, category), 15000);
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify(results));
         } catch (err) {
           res.writeHead(500, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: err.message }));
+          res.end(JSON.stringify({ error: err.message || 'Server Error' }));
         }
         return;
       }
@@ -237,12 +247,12 @@ async function main() {
           return;
         }
         try {
-          const results = await extractDownloadLinks(pathParam, category);
+          const results = await withServerTimeout(extractDownloadLinks(pathParam, category), 15000);
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify(results));
         } catch (err) {
           res.writeHead(500, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: err.message }));
+          res.end(JSON.stringify({ error: err.message || 'Server Error' }));
         }
         return;
       }

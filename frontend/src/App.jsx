@@ -25,6 +25,17 @@ import resultNotFound from './assets/result-not-found.jpg';
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:3000/api';
 const CURRENT_YEAR = new Date().getFullYear().toString();
 const LATEST_PER_PAGE = 25;
+const API_TIMEOUT_MS = 15000;
+
+async function fetchWithTimeout(url, options = {}, timeoutMs = API_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 export default function App() {
   const [category, setCategory] = useState('tamil'); // 'tamil' (default) | 'dubbed'
@@ -116,11 +127,12 @@ export default function App() {
     shouldScrollToResultsRef.current = autoScroll;
 
     try {
-      const res = await fetch(
+      const res = await fetchWithTimeout(
         `${API_BASE}/search?q=${encodeURIComponent(searchQuery)}&page=${targetPage}&limit=${LATEST_PER_PAGE}&type=${encodeURIComponent(mode)}&category=${encodeURIComponent(cat)}`
       );
       if (!res.ok) {
-        throw new Error(`Server returned status: ${res.status}`);
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || `Server Error (status: ${res.status})`);
       }
       const data = await res.json();
       if (Array.isArray(data)) {
@@ -162,7 +174,11 @@ export default function App() {
       setActiveCategory(cat);
     } catch (err) {
       console.error('Search error:', err);
-      setError('Failed to fetch movies. Make sure the backend server is running.');
+      if (err.name === 'AbortError') {
+        setError('Server Error: Request timed out after 15 seconds. Please try again.');
+      } else {
+        setError(err.message || 'Server Error: Failed to fetch movies.');
+      }
     } finally {
       setLoadingSearch(false);
     }
@@ -261,7 +277,7 @@ export default function App() {
     }
 
     const cleanQuery = query.trim();
-    if (cleanQuery) {
+    if (cleanQuery.length >= 2) {
       await fetchMovies(cleanQuery, 1, searchType, false, newCategory);
     } else {
       await fetchMovies('latest', 1, searchType, false, newCategory);
@@ -271,25 +287,20 @@ export default function App() {
   const handleSearch = async (e) => {
     e?.preventDefault();
     const cleanQuery = query.trim();
-    if (e && cleanQuery && typeof window !== 'undefined' && window.umami) {
+    if (cleanQuery.length < 2) return;
+
+    if (e && typeof window !== 'undefined' && window.umami) {
       window.umami.track(`Movie: ${cleanQuery}`, {
         name: cleanQuery,
         type: searchType,
         category
       });
     }
-    const targetQuery =
-      cleanQuery ||
-      (searchType === 'actor'
-        ? selectedActor?.name || 'Vijay'
-        : searchType === 'year'
-          ? CURRENT_YEAR
-          : 'latest');
     await fetchMovies(
-      targetQuery,
+      cleanQuery,
       1,
       searchType,
-      searchType === 'actor' || Boolean(cleanQuery),
+      true,
       category
     );
   };
@@ -377,11 +388,12 @@ export default function App() {
     setMovieDetails(null);
 
     try {
-      const res = await fetch(
+      const res = await fetchWithTimeout(
         `${API_BASE}/downloads?path=${encodeURIComponent(movie.path)}&category=${encodeURIComponent(movieCat)}`
       );
       if (!res.ok) {
-        throw new Error(`Server returned status: ${res.status}`);
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || `Server Error (status: ${res.status})`);
       }
       const data = await res.json();
       if (data && data.downloads) {
@@ -401,7 +413,11 @@ export default function App() {
       }
     } catch (err) {
       console.error('Downloads fetch error:', err);
-      setError(`Failed to extract download links for "${movie.title}".`);
+      if (err.name === 'AbortError') {
+        setError(`Server Error: Request timed out after 15 seconds while loading "${movie.title}".`);
+      } else {
+        setError(err.message || `Server Error: Failed to extract download links for "${movie.title}".`);
+      }
     } finally {
       setLoadingDownloads(false);
     }
@@ -640,7 +656,12 @@ export default function App() {
                   <X size={16} />
                 </button>
               )}
-              <button type="submit" className="search-button" disabled={loadingSearch}>
+              <button
+                type="submit"
+                className="search-button"
+                disabled={loadingSearch || query.trim().length < 2}
+                title={query.trim().length < 2 ? 'Enter at least 2 characters to search' : ''}
+              >
                 {loadingSearch
                   ? 'Searching...'
                   : searchType === 'year'

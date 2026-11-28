@@ -22,10 +22,15 @@ export default async function handler(req, res) {
   }
 
   try {
-    const results = await extractDownloadLinks(path, category);
+    const results = await Promise.race([
+      extractDownloadLinks(path, category),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Server Error: Request timed out after 15 seconds')), 15000)
+      )
+    ]);
     return res.status(200).json(results);
   } catch (err) {
     console.error('Vercel Downloads API Error:', err);
-    return res.status(500).json({ error: err.message });
+    return res.status(500).json({ error: err.message || 'Server Error' });
   }
 }
